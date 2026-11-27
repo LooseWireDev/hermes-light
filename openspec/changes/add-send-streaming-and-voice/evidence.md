@@ -364,3 +364,21 @@ failed later windows without partial commits, and bounded-backlog overflow.
 Artifact: `tool/build/outputs/apk/debug/tool-debug.apk`. No new runtime dependency/model.
 Existing SDK publication/compile-SDK warnings remain; the JVM fake microphone's monitor also
 produces Kotlin's Java-Object style warning. No runtime/visual acceptance or vault update claimed.
+
+## 2026-11-27 — M1.4 voice engine (server path proven, hold path not device-testable)
+
+Signed 0.2.2 (code 106) on the LP3 AVD; dashboard loopback.
+
+- Engine lands: `voice/Listener.kt` (AudioRecord, 16 kHz mono PCM16, DictationTake windows),
+  `voice/WavAudio.kt` (WAV writer), transcription via `POST api/audio/transcribe`.
+- Dashboard STT proven independently of the app: `POST api/audio/speak` (provider edge) produced
+  speech for "The quick brown fox jumps over the lazy dog.", and feeding that audio back to
+  `api/audio/transcribe` returned the sentence verbatim (`provider: local`). Silence returns
+  `{"ok":true,"transcript":""}` — the NoSpeech case, not an error.
+- Unit tests: 21/21 green — ListenerTest (6), WavAudioTest (2), DictationTakeTest (13).
+- NOT verified on device: a real timed key hold. `adb shell input keyevent --longpress` does not
+  produce DOWN…UP with a gap, and `sendevent /dev/input/event1` is Permission denied on this AVD, so
+  the hold→listen→transcribe path cannot be exercised without the physical phone. This is the one
+  thing alpha6 must be judged on, with the microphone.
+- Also unverified here: the diagnostics readout — the long-press on the status line did not surface a
+  panel in two attempts on the AVD.
