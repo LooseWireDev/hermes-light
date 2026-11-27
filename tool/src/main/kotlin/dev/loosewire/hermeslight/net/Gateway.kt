@@ -7,12 +7,20 @@
  */
 package dev.loosewire.hermeslight.net
 
+import kotlinx.coroutines.CancellableContinuation
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withTimeout
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import okhttp3.OkHttpClient
@@ -20,6 +28,7 @@ import okhttp3.Request
 import okhttp3.Response
 import okhttp3.WebSocket
 import okhttp3.WebSocketListener
+import kotlin.coroutines.resumeWithException
 import kotlin.math.ceil
 import kotlin.math.ln
 
@@ -94,16 +103,48 @@ internal fun backoffDelayMillis(
     return delay.toLong().coerceIn(1L, config.maxBackoffMillis)
 }
 
+/** Rejection/no-connection are known failures; timeout/connection-loss leave the outcome unknown. */
+enum class RpcFailureKind {
+    /** No live socket, so the command was never sent. */
+    NOT_CONNECTED,
+
+    /** No reply arrived in time. The dashboard may still have applied the command. */
+    TIMEOUT,
+
+    /** The dashboard answered with a JSON-RPC error; the command was refused. */
+    REJECTED,
+
+    /** The socket was replaced, backgrounded, or lost after the command was sent. */
+    CONNECTION_LOST,
+}
+
 /**
- * Read-only JSON-RPC gateway client.
+ * Honest, user-showable failure for one JSON-RPC command. The message names the method and the
+ * outcome, never the params (which can carry prompt text).
+ */
+class GatewayRpcException(
+    message: String,
+    val kind: RpcFailureKind,
+    val code: Int? = null,
+    cause: Throwable? = null,
+) : Exception(message, cause)
+
+/**
+ * JSON-RPC gateway client.
  *
  * The dashboard's first frame is `gateway.ready`; it is the handshake. On that frame this client
- * sends `client.capabilities` with its identity and `server_requests: false` (M0 cannot answer
- * approval/clarify requests), then reports [GatewayState.Connected].
+ * sends `client.capabilities` with its identity and `server_requests: false`, then reports
+ * [GatewayState.Connected]. The client never answers a same-id server request; approval and clarify
+ * prompts surface as events and are answered with explicit `approval.respond` / `clarify.respond`
+ * calls through [request].
  *
  * Reconnects back off exponentially while the app is foregrounded and the scope is alive. Listener
  * callbacks are dispatched on [scope], so a main-dispatcher scope keeps UI state on the main thread.
- * The client never sends approval, clarify, or prompt frames.
+ *
+ * [request] sends one command and waits for its correlated reply id. Commands are never replayed:
+ * a replacement connection, backgrounding, disconnect, or transport failure fails outstanding
+ * commands with [RpcFailureKind.CONNECTION_LOST] and an honest "outcome unknown" message, and a
+ * timeout bounds how long a caller waits.
  */
 class Gateway(
     private val scope: CoroutineScope,
@@ -135,9 +176,12 @@ class Gateway(
     private var connected: Boolean = false
     private var foreground: Boolean = true
     private var manualDisconnect: Boolean = false
+    private var requestSequence: Long = 0
+    private val pendingCalls = mutableMapOf<String, PendingCall>()
 
     fun connect(connection: GatewayConnection) {
         val previous: WebSocket?
+        val outstanding: List<PendingCall>
         synchronized(lock) {
             target = connection
             manualDisconnect = false
@@ -152,9 +196,11 @@ class Gateway(
             dialJob?.cancel()
             dialJob = null
             capabilitiesSentGeneration = -1
+            outstanding = takePendingCallsLocked()
             previous = socket
             socket = null
         }
+        failPendingCalls(outstanding, "the connection being replaced")
         previous?.close(CLOSE_NORMAL, "Reconnecting")
         if (foreground) {
             setState(GatewayState.Connecting)
@@ -176,12 +222,105 @@ class Gateway(
     }
 
     /**
+     * Send one JSON-RPC command and wait for its correlated reply.
+     *
+     * Returns the reply's `result` (null when the gateway sent none). A same-id reply that arrives
+     * after its call was failed or that belongs to another socket generation is ignored. The
+     * command is never replayed: callers must decide whether to resend after a failure. Failures
+     * throw [GatewayRpcException]; [timeoutMillis] bounds the wait.
+     */
+    suspend fun request(
+        method: String,
+        params: JsonObject = JsonObject(emptyMap()),
+        timeoutMillis: Long = DEFAULT_REQUEST_TIMEOUT_MILLIS,
+    ): JsonElement? {
+        require(method.isNotBlank()) { "method must not be blank" }
+        require(timeoutMillis > 0) { "timeoutMillis must be positive" }
+        val id: String
+        val socketGeneration: Int
+        val webSocket: WebSocket
+        synchronized(lock) {
+            val active = socket
+            if (!connected || !foreground || manualDisconnect || active == null) {
+                throw GatewayRpcException(
+                    "Not connected to the dashboard — $method was not sent",
+                    RpcFailureKind.NOT_CONNECTED,
+                )
+            }
+            id = "hl-${++requestSequence}"
+            socketGeneration = generation
+            webSocket = active
+        }
+        val frame =
+            buildJsonObject {
+                put("jsonrpc", "2.0")
+                put("id", id)
+                put("method", method)
+                put("params", params)
+            }.toString()
+        return try {
+            withTimeout(timeoutMillis) {
+                suspendCancellableCoroutine<JsonElement?> { continuation ->
+                    val call = PendingCall(method, socketGeneration, continuation)
+                    val registered =
+                        synchronized(lock) {
+                            if (connected &&
+                                foreground &&
+                                !manualDisconnect &&
+                                socketGeneration == generation &&
+                                socket === webSocket
+                            ) {
+                                pendingCalls[id] = call
+                                true
+                            } else {
+                                false
+                            }
+                        }
+                    if (!registered) {
+                        continuation.resumeWithException(
+                            GatewayRpcException(
+                                "Connection changed before $method was sent",
+                                RpcFailureKind.NOT_CONNECTED,
+                            ),
+                        )
+                        return@suspendCancellableCoroutine
+                    }
+                    continuation.invokeOnCancellation {
+                        synchronized(lock) { pendingCalls.remove(id) }
+                    }
+                    if (!webSocket.send(frame)) {
+                        val removed = synchronized(lock) { pendingCalls.remove(id) }
+                        if (removed != null) {
+                            removed.fail(
+                                GatewayRpcException(
+                                    "$method could not be sent — outcome unknown",
+                                    RpcFailureKind.CONNECTION_LOST,
+                                ),
+                            )
+                        }
+                    }
+                }
+            }
+        } catch (timeout: TimeoutCancellationException) {
+            // Only this call's own deadline becomes a typed outcome; an outer cancellation stays
+            // cancellation so structured concurrency still works.
+            if (!currentCoroutineContext().isActive) throw timeout
+            synchronized(lock) { pendingCalls.remove(id) }
+            throw GatewayRpcException(
+                "$method timed out after ${timeoutMillis}ms — outcome unknown",
+                RpcFailureKind.TIMEOUT,
+            )
+        }
+    }
+
+    /**
      * Stops the socket without emitting a state callback. A caller that just failed setup already
      * shows its own specific error; a queued "disconnected" callback must not overwrite it.
      * Background/foreground disconnects use [onForeground] and do update the status line.
      */
     fun disconnect() {
         val previous: WebSocket?
+        val outstanding: List<PendingCall>
         synchronized(lock) {
             manualDisconnect = true
             generation += 1
@@ -195,21 +334,25 @@ class Gateway(
             dialJob?.cancel()
             dialJob = null
             connected = false
+            outstanding = takePendingCallsLocked()
             previous = socket
             socket = null
         }
+        failPendingCalls(outstanding, "a disconnect")
         previous?.close(CLOSE_NORMAL, "Client closed")
     }
 
     /** Closing in the background is deliberate: no socket, no retries, an honest disconnected line. */
     fun onForeground(value: Boolean) {
         val closeSocket: WebSocket?
+        val outstanding: List<PendingCall>
         val resume: Boolean
         synchronized(lock) {
             if (foreground == value) return
             foreground = value
             if (value) {
                 closeSocket = null
+                outstanding = emptyList()
                 resume =
                     target != null &&
                     !manualDisconnect &&
@@ -225,11 +368,13 @@ class Gateway(
                 dialJob?.cancel()
                 dialJob = null
                 connected = false
+                outstanding = takePendingCallsLocked()
                 closeSocket = socket
                 socket = null
                 resume = false
             }
         }
+        failPendingCalls(outstanding, "the app going to the background")
         closeSocket?.close(CLOSE_NORMAL, "Background")
         if (!value) {
             setState(GatewayState.Disconnected)
@@ -366,12 +511,14 @@ class Gateway(
         authFailure: Boolean = false,
     ) {
         val socketToCancel: WebSocket?
+        val outstanding: List<PendingCall>
         synchronized(lock) {
             if (generation != this.generation) return
             this.generation += 1
             socketToCancel = socket
             socket = null
             connected = false
+            outstanding = takePendingCallsLocked()
             handshakeJob?.cancel()
             handshakeJob = null
             reconnectJob?.cancel()
@@ -379,6 +526,7 @@ class Gateway(
             dialJob?.cancel()
             dialJob = null
         }
+        failPendingCalls(outstanding, "the connection closing")
         socketToCancel?.cancel()
         if (authFailure) {
             setState(GatewayState.AuthFailed(message))
@@ -429,6 +577,71 @@ class Gateway(
 
     private fun isConnected(socketGeneration: Int): Boolean = synchronized(lock) { socketGeneration == generation && connected }
 
+    /** Must be called with [lock] held: snapshot and forget every in-flight command. */
+    private fun takePendingCallsLocked(): List<PendingCall> {
+        if (pendingCalls.isEmpty()) return emptyList()
+        val calls = pendingCalls.values.toList()
+        pendingCalls.clear()
+        return calls
+    }
+
+    private fun failPendingCalls(
+        calls: List<PendingCall>,
+        reason: String,
+    ) {
+        calls.forEach { call ->
+            call.fail(
+                GatewayRpcException(
+                    "${call.method} interrupted by $reason — outcome unknown",
+                    RpcFailureKind.CONNECTION_LOST,
+                ),
+            )
+        }
+    }
+
+    /**
+     * Remove the call a reply belongs to. An id from another socket generation, an already-failed
+     * call, or an unsolicited reply (such as the capabilities ack) matches nothing.
+     */
+    private fun takePendingReply(
+        id: String,
+        socketGeneration: Int,
+    ): PendingCall? =
+        synchronized(lock) {
+            val pending = pendingCalls[id] ?: return@synchronized null
+            if (pending.generation != socketGeneration) return@synchronized null
+            pendingCalls.remove(id)
+        }
+
+    private fun completeResult(
+        id: String,
+        result: JsonElement?,
+        socketGeneration: Int,
+    ) {
+        takePendingReply(id, socketGeneration)?.succeed(result)
+    }
+
+    private fun completeError(
+        id: String,
+        error: GatewayRpcError,
+        socketGeneration: Int,
+    ) {
+        val call = takePendingReply(id, socketGeneration) ?: return
+        val codeText = error.code?.let { " (code $it)" }.orEmpty()
+        val detail =
+            error.message
+                ?.takeIf { it.isNotBlank() }
+                ?.let { ": $it" }
+                .orEmpty()
+        call.fail(
+            GatewayRpcException(
+                "Dashboard rejected ${call.method}$codeText$detail",
+                RpcFailureKind.REJECTED,
+                error.code,
+            ),
+        )
+    }
+
     private fun setState(next: GatewayState) {
         val version: Int
         synchronized(lock) {
@@ -441,6 +654,20 @@ class Gateway(
             // Disconnected/Connecting from overwriting the final error line.
             val current = synchronized(lock) { version == stateVersion }
             if (current) runCatching { listener.onState(next) }
+        }
+    }
+
+    private class PendingCall(
+        val method: String,
+        val generation: Int,
+        private val continuation: CancellableContinuation<JsonElement?>,
+    ) {
+        fun succeed(result: JsonElement?) {
+            continuation.resumeWith(Result.success(result))
+        }
+
+        fun fail(exception: GatewayRpcException) {
+            continuation.resumeWith(Result.failure(exception))
         }
     }
 
@@ -482,14 +709,19 @@ class Gateway(
                     emit(frame.event, socketGeneration)
                 }
 
+                is ParsedFrame.Response -> completeResult(frame.id, frame.result, socketGeneration)
+
+                is ParsedFrame.ResponseError -> completeError(frame.id, frame.error, socketGeneration)
+
                 is ParsedFrame.ServerRequest -> {
-                    // M0 never answers an RPC request. Known approval/clarify requests still surface
-                    // as the same read-only notices as their notification form.
+                    // The client keeps server_requests:false and never answers a same-id request.
+                    // Approval/clarify prompts surface as events; the app answers them with an
+                    // explicit approval.respond / clarify.respond call through request().
                     val event = frame.event ?: GatewayEvent.Unknown(frame.method, text)
                     emit(event, socketGeneration)
                 }
 
-                else -> Unit
+                is ParsedFrame.Invalid -> Unit
             }
         }
 
@@ -561,6 +793,10 @@ class Gateway(
     companion object {
         private const val CLIENT_NAME = "hermes-light"
         private const val CLOSE_NORMAL = 1000
+
+        /** Default bound on one [request]; after it the command's outcome is unknown. */
+        const val DEFAULT_REQUEST_TIMEOUT_MILLIS: Long = 20_000L
+
         private val CREDENTIAL_WORD = Regex("""\b(token|ticket)=[^&\s]+""")
         private val CREDENTIAL_QUERY = Regex("""[?&](token|ticket)=[^&\s]+""")
     }

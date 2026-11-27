@@ -8,6 +8,7 @@ package dev.loosewire.hermeslight.net
 import kotlinx.serialization.json.jsonObject
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
@@ -40,6 +41,10 @@ class GatewayEventParserTest {
             event("message.interim"),
         )
         assertEquals(
+            GatewayEvent.MessageInterim("s1", "partial"),
+            event("message.interim", """{"text":"partial"}"""),
+        )
+        assertEquals(
             GatewayEvent.MessageComplete("answer", "because", true, "s1"),
             event(
                 "message.complete",
@@ -50,6 +55,10 @@ class GatewayEventParserTest {
         assertEquals(
             GatewayEvent.ReasoningDelta("thinking", "s1"),
             event("reasoning.delta", """{"text":"thinking"}"""),
+        )
+        assertEquals(
+            GatewayEvent.ReasoningDelta("plain", "s1"),
+            event("reasoning", """{"text":"plain"}"""),
         )
         assertEquals(
             GatewayEvent.ReasoningAvailable("done thinking", "s1"),
@@ -82,7 +91,7 @@ class GatewayEventParserTest {
     }
 
     @Test
-    fun `approval notices are read-only but fully described`() {
+    fun `approval requests describe their gating and choices`() {
         val requested =
             event(
                 "approval.request",
@@ -105,6 +114,7 @@ class GatewayEventParserTest {
         assertEquals("/etc", requested.path)
         assertEquals(listOf("once", "deny"), requested.choices)
         assertEquals("s1", requested.sessionId)
+        assertFalse(requested.allowAll)
 
         val defaults =
             event(
@@ -113,6 +123,7 @@ class GatewayEventParserTest {
             ) as GatewayEvent.ApprovalRequested
         assertEquals(ApprovalKind.COMMAND, defaults.kind)
         assertEquals(listOf("once", "deny"), defaults.choices)
+        assertFalse(defaults.allowAll)
 
         assertEquals(
             GatewayEvent.ApprovalPending("s1"),
@@ -122,6 +133,88 @@ class GatewayEventParserTest {
             GatewayEvent.ApprovalReceived("req-3", "s1"),
             event("approval.received", """{"request_id":"req-3"}"""),
         )
+
+        val cancelled =
+            event(
+                "approval.cancelled",
+                """
+                {
+                  "stored_session_id": "stored-1",
+                  "reason": "interrupt",
+                  "cancelled_count": 2,
+                  "request_ids": ["r1", "r2"]
+                }
+                """.trimIndent(),
+            ) as GatewayEvent.ApprovalCancelled
+        assertEquals("stored-1", cancelled.sessionId)
+        assertEquals("stored-1", cancelled.storedSessionId)
+        assertEquals("interrupt", cancelled.reason)
+        assertEquals(2, cancelled.cancelledCount)
+        assertEquals(listOf("r1", "r2"), cancelled.requestIds)
+
+        val cancelledWithoutCount =
+            event("approval.cancelled", """{"request_ids":["r9"]}""")
+                as GatewayEvent.ApprovalCancelled
+        assertEquals(1, cancelledWithoutCount.cancelledCount)
+        assertEquals(listOf("r9"), cancelledWithoutCount.requestIds)
+    }
+
+    @Test
+    fun `blanket approval is offered only when the payload explicitly allows it`() {
+        val bare =
+            event("approval.request", """{"request_id":"r-bare"}""") as GatewayEvent.ApprovalRequested
+        assertEquals(listOf("once", "deny"), bare.choices)
+        assertFalse(bare.allowAll)
+
+        val sessionOnly =
+            event("approval.request", """{"allow_session":true}""") as GatewayEvent.ApprovalRequested
+        assertEquals(listOf("once", "session", "deny"), sessionOnly.choices)
+        assertFalse(sessionOnly.allowAll)
+
+        val explicitAll =
+            event(
+                "approval.request",
+                """{"request_id":"r-all","allow_all":true,"allow_session":false}""",
+            ) as GatewayEvent.ApprovalRequested
+        assertEquals(listOf("once", "always", "deny"), explicitAll.choices)
+        assertTrue(explicitAll.allowAll)
+
+        val allAlias =
+            event("approval.request", """{"all":true,"execution_generation":"7"}""")
+                as GatewayEvent.ApprovalRequested
+        assertTrue(allAlias.allowAll)
+        assertEquals(7, allAlias.executionGeneration)
+
+        val canonical =
+            event(
+                "approval.request",
+                """{"prompt_id":"p-7","execution_generation":3,"command":"rm x"}""",
+            ) as GatewayEvent.ApprovalRequested
+        assertEquals("p-7", canonical.requestId)
+        assertEquals("p-7", canonical.promptId)
+        assertEquals(3, canonical.executionGeneration)
+
+        val permanent =
+            event("approval.request", """{"allow_permanent":true}""") as GatewayEvent.ApprovalRequested
+        assertTrue(permanent.allowAll)
+        assertEquals(listOf("once", "always", "deny"), permanent.choices)
+
+        val provided =
+            event("approval.request", """{"choices":["once","always","deny"]}""")
+                as GatewayEvent.ApprovalRequested
+        assertTrue(provided.allowAll)
+        assertEquals(listOf("once", "always", "deny"), provided.choices)
+
+        val providedWithoutAlways =
+            event("approval.request", """{"choices":["once","deny"],"allow_all":true}""")
+                as GatewayEvent.ApprovalRequested
+        assertTrue(providedWithoutAlways.allowAll)
+        assertEquals(listOf("once", "deny"), providedWithoutAlways.choices)
+
+        val smartDenied =
+            event("approval.request", """{"smart_denied":true,"allow_all":true}""")
+                as GatewayEvent.ApprovalRequested
+        assertFalse(smartDenied.allowAll)
     }
 
     @Test
@@ -157,6 +250,27 @@ class GatewayEventParserTest {
         assertEquals("Pick", legacy.text)
         assertEquals(listOf("x", "y"), legacy.options)
         assertTrue(legacy.multiSelect)
+        assertNull(legacy.promptId)
+        assertNull(legacy.executionGeneration)
+        assertTrue(legacy.lockedAnswers.isEmpty())
+
+        val canonical =
+            event(
+                "clarify.request",
+                """
+                {
+                  "prompt_id": "p-9",
+                  "execution_generation": "7",
+                  "question": "Which?",
+                  "choices": ["a", "b"],
+                  "answers": {"q1": "a", "q2": null}
+                }
+                """.trimIndent(),
+            ) as GatewayEvent.ClarifyRequested
+        assertEquals("p-9", canonical.promptId)
+        assertEquals("p-9", canonical.clarifyId)
+        assertEquals(7, canonical.executionGeneration)
+        assertEquals(mapOf("q1" to "a"), canonical.lockedAnswers)
 
         assertEquals(
             GatewayEvent.ClarifyExpired("cl-3", false, "s1"),
@@ -264,6 +378,34 @@ class GatewayEventParserTest {
                 """{"jsonrpc":"2.0","id":"srv-2","method":"config.get","params":{}}""",
             ) as ParsedFrame.ServerRequest
         assertNull(unhandled.event)
+
+        val canonicalClarify =
+            GatewayEventParser.parse(
+                """
+                {"jsonrpc":"2.0","id":"srv-3","method":"clarify","params":{
+                  "session_id":"s1",
+                  "questions":[{"qid":"q1","question":"Which?","choices":["a"]}],
+                  "answers":{"q1":"a"}
+                }}
+                """.trimIndent(),
+            ) as ParsedFrame.ServerRequest
+        val clarify = canonicalClarify.event as? GatewayEvent.ClarifyRequested ?: error("expected clarify projection")
+        assertEquals("q1", clarify.questionId)
+        assertEquals(mapOf("q1" to "a"), clarify.lockedAnswers)
+
+        val canonicalApproval =
+            GatewayEventParser.parse(
+                """
+                {"jsonrpc":"2.0","id":"srv-4","method":"approval","params":{
+                  "session_id":"s1",
+                  "request_id":"req-9",
+                  "choices":["once","deny"]
+                }}
+                """.trimIndent(),
+            ) as ParsedFrame.ServerRequest
+        val approval = canonicalApproval.event as? GatewayEvent.ApprovalRequested ?: error("expected approval projection")
+        assertEquals("req-9", approval.requestId)
+        assertFalse(approval.allowAll)
     }
 
     @Test

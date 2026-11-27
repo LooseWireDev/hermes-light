@@ -71,6 +71,8 @@ sealed interface GatewayEvent {
 
     data class MessageInterim(
         override val sessionId: String?,
+        /** Interim text when the gateway sends it; null on segment-seal-only frames. */
+        val text: String? = null,
     ) : GatewayEvent
 
     data class MessageComplete(
@@ -112,6 +114,16 @@ sealed interface GatewayEvent {
         val risk: String?,
         val choices: List<String>,
         override val sessionId: String?,
+        /**
+         * True only when the payload explicitly grants a blanket "always" choice (`allow_all`,
+         * `all`, or `allow_permanent`, or an "always" entry in the provided choices). Absent
+         * permission stays false; the UI never invents an Always row.
+         */
+        val allowAll: Boolean = false,
+        /** Canonical owner prompt generation when present; approvals ignore it on legacy gateways. */
+        val executionGeneration: Int? = null,
+        /** Canonical owner prompt id (`prompt_id`), echoed by canonical approval.respond. */
+        val promptId: String? = null,
     ) : GatewayEvent
 
     data class ApprovalPending(
@@ -123,6 +135,19 @@ sealed interface GatewayEvent {
         override val sessionId: String?,
     ) : GatewayEvent
 
+    /**
+     * `approval.cancelled`: the gateway dropped pending approvals because the turn was interrupted,
+     * reaped, or torn down. The wait resolved as deny, not because the user refused. Absence from
+     * `approval.pending` on reconnect is the other (query-only) settlement signal.
+     */
+    data class ApprovalCancelled(
+        override val sessionId: String?,
+        val storedSessionId: String? = null,
+        val reason: String? = null,
+        val cancelledCount: Int = 0,
+        val requestIds: List<String> = emptyList(),
+    ) : GatewayEvent
+
     data class ClarifyRequested(
         val clarifyId: String?,
         val questionId: String?,
@@ -131,6 +156,12 @@ sealed interface GatewayEvent {
         val multiSelect: Boolean,
         val questions: List<ClarifyQuestion>,
         override val sessionId: String?,
+        /** Canonical owner prompt id (`prompt_id`), echoed by a canonical clarify.respond. */
+        val promptId: String? = null,
+        /** Canonical prompt fence (`execution_generation`); null on legacy gateways. */
+        val executionGeneration: Int? = null,
+        /** Replay-only answers already locked for this batch, keyed by question id. */
+        val lockedAnswers: Map<String, String> = emptyMap(),
     ) : GatewayEvent
 
     data class ClarifyExpired(
@@ -207,8 +238,9 @@ sealed interface ParsedFrame {
         val method: String,
         val params: JsonObject,
         /**
-         * Read-only projection for approval/clarify requests the gateway expects a response to.
-         * The gateway client never answers in M0; it surfaces the notice instead of dropping it.
+         * Projection for approval/clarify requests the gateway expects a response to. The client
+         * keeps `server_requests:false` and never answers the same id; the app answers with an
+         * explicit approval.respond / clarify.respond call instead of dropping the prompt.
          */
         val event: GatewayEvent? = null,
     ) : ParsedFrame
@@ -245,7 +277,7 @@ object GatewayEventParser {
             "resuming",
         )
 
-    private val readOnlyServerRequestMethods =
+    private val serverRequestMethods =
         setOf(
             "approval.request",
             "approval.pending",
@@ -279,7 +311,7 @@ object GatewayEventParser {
                 id = id,
                 method = method,
                 params = params,
-                event = readOnlyServerRequestEvent(method, params, raw),
+                event = projectServerRequestEvent(method, params, raw),
             )
         }
         if (id != null) {
@@ -306,25 +338,33 @@ object GatewayEventParser {
     }
 
     /**
-     * M0 advertises `server_requests: false`, but an older or forgetful gateway can still send a
-     * same-id request. Approval and clarify requests are projected to the same read-only events as
-     * their notification form; the client never sends a response frame.
+     * The client advertises `server_requests: false`, but an older or forgetful gateway can still
+     * send a same-id request. Approval and clarify requests are projected to the same events as
+     * their notification form so the app can answer them explicitly; no response frame is sent.
      */
-    private fun readOnlyServerRequestEvent(
+    private fun projectServerRequestEvent(
         method: String,
         params: JsonObject,
         raw: String,
     ): GatewayEvent? {
-        if (method !in readOnlyServerRequestMethods) return null
+        // Same-id server requests name the prompt family `approval`/`clarify`; the push event
+        // vocabulary appends `.request`, so both forms project to one event.
+        val type =
+            when (method) {
+                "approval" -> "approval.request"
+                "clarify" -> "clarify.request"
+                else -> method
+            }
+        if (type !in serverRequestMethods) return null
         val envelope =
             JsonObject(
                 params +
                     mapOf(
-                        "type" to JsonPrimitive(method),
+                        "type" to JsonPrimitive(type),
                         "payload" to params,
                     ),
             )
-        return parseEvent(method, envelope, raw)
+        return parseEvent(type, envelope, raw)
     }
 
     private fun parseEvent(
@@ -373,7 +413,11 @@ object GatewayEventParser {
                     sessionId = sessionId,
                 )
 
-            "message.interim" -> GatewayEvent.MessageInterim(sessionId = sessionId)
+            "message.interim" ->
+                GatewayEvent.MessageInterim(
+                    sessionId = sessionId,
+                    text = eventText(payload, params).takeIf { it.isNotEmpty() },
+                )
 
             "message.complete" ->
                 GatewayEvent.MessageComplete(
@@ -385,7 +429,7 @@ object GatewayEventParser {
 
             "message.done" -> GatewayEvent.MessageDone(sessionId = sessionId)
 
-            "thinking.delta", "reasoning.delta" ->
+            "thinking.delta", "reasoning.delta", "reasoning" ->
                 GatewayEvent.ReasoningDelta(
                     text = eventText(payload, params),
                     sessionId = sessionId,
@@ -442,6 +486,18 @@ object GatewayEventParser {
 
             "approval.request" -> parseApprovalRequested(payload, sessionId)
             "approval.pending" -> GatewayEvent.ApprovalPending(sessionId = sessionId)
+            "approval.cancelled" -> {
+                val requestIds = stringList(payload["request_ids"])
+                val storedSessionId = payload.stringOrNull("stored_session_id")
+                GatewayEvent.ApprovalCancelled(
+                    // App state is keyed by the stored REST id, so prefer it over a runtime id.
+                    sessionId = storedSessionId ?: sessionId,
+                    storedSessionId = storedSessionId,
+                    reason = payload.stringOrNull("reason"),
+                    cancelledCount = payload.intOrNull("cancelled_count") ?: requestIds.size,
+                    requestIds = requestIds,
+                )
+            }
             "approval.received" ->
                 GatewayEvent.ApprovalReceived(
                     requestId = payload.stringOrNull("request_id"),
@@ -523,6 +579,15 @@ object GatewayEventParser {
         val smartDenied = payload.booleanOrNull("smart_denied")
         val allowSession = payload.booleanOrNull("allow_session")
         val allowPermanent = payload.booleanOrNull("allow_permanent")
+        // Only explicit permission counts: a bare request never offers "always".
+        val explicitAll = payload.booleanOrNull("allow_all") ?: payload.booleanOrNull("all") ?: false
+        val allowAll =
+            smartDenied != true &&
+                (
+                    explicitAll ||
+                        allowPermanent == true ||
+                        providedChoices.any { it.equals("always", ignoreCase = true) }
+                )
         val choices =
             providedChoices.ifEmpty {
                 if (smartDenied == true) {
@@ -530,10 +595,8 @@ object GatewayEventParser {
                 } else {
                     buildList {
                         add("once")
-                        if (allowSession != false) {
-                            add("session")
-                            if (allowPermanent != false) add("always")
-                        }
+                        if (allowSession == true) add("session")
+                        if (allowAll) add("always")
                         add("deny")
                     }
                 }
@@ -549,6 +612,9 @@ object GatewayEventParser {
             risk = payload.stringOrNull("risk"),
             choices = choices,
             sessionId = sessionId,
+            allowAll = allowAll,
+            executionGeneration = payload.intOrNull("execution_generation"),
+            promptId = payload.stringOrNull("prompt_id"),
         )
     }
 
@@ -593,8 +659,18 @@ object GatewayEventParser {
             multiSelect = primary?.multiSelect ?: payload.booleanOrNull("multi_select") ?: false,
             questions = questions,
             sessionId = sessionId,
+            promptId = payload.stringOrNull("prompt_id"),
+            executionGeneration = payload.intOrNull("execution_generation"),
+            lockedAnswers = stringMap(payload["answers"] ?: payload["locked_answers"]),
         )
     }
+
+    /** Replay-only locked answers: a map of question id to the answer already recorded. */
+    private fun stringMap(element: JsonElement?): Map<String, String> =
+        (element as? JsonObject)
+            ?.mapNotNull { (key, value) -> value.asStringOrNull()?.let { key to it } }
+            ?.toMap()
+            .orEmpty()
 
     private fun clarifyId(payload: JsonObject): String? =
         payload.stringOrNull("clarify_id")
