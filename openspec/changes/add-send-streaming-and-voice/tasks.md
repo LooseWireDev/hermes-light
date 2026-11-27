@@ -89,3 +89,44 @@ the wheel to talk — as long as you like, because dictation is chunked and stit
 - [x] 10.2 Keep `latest-descendant` as the tip resolver (it returns the stored tip, not the runtime id) — document that order in the code: descendant → resume → submit.
 - [x] 10.3 Log RPC failures (method, code, message — never tokens) at debug level so device failures are diagnosable from logcat.
 - [x] 10.4 Unit tests: resume-then-submit happy path; 4001 → resume → retry; resume failure surfaces a specific error.
+
+## 11. M1.3 — terminal event never clears the live state (device defect from the M1.2 probe)
+
+Found by device probe on `mealforge_lpi3_ui_test_v1` (2026-11-27). Accepted path works end to end:
+descendant → resume → submit delivered the prompt, deltas streamed, and the server persisted the turn
+on the session's own model. The defect is the *end* of the turn.
+
+- [ ] 11.1 Apply the run-completion event to live UI state: when the assistant turn ends, clear the
+      streaming caret, drop the `· Stop` affordance, and clear the session's `● live` marker without
+      requiring an app restart. Reproduction: submit a prompt, wait for the server's
+      `tui turn finished: status=complete`, observe the UI still streaming minutes later.
+- [ ] 11.2 Correlate terminal events by every id the turn was known by (stored id, resumed runtime id
+      and any runtime alias), so a completion delivered against an alias still closes the run.
+- [ ] 11.3 Extend the debug log beyond RPC failures: emit event routing (event name, stored id,
+      runtime id, whether it was applied) at debug level so a missed terminal event is readable from
+      logcat instead of inferred. This probe left no app-side trace because 10.3 logs rejections only.
+- [ ] 11.4 Unit tests: completion applied on stored id, on runtime id, and on a late alias; a second
+      completion after close is a no-op; live state is derived from applied events, not sticky flags.
+- [ ] 11.5 Device re-probe: accepted turn ends with no caret and no Stop while the app stays open; then
+      exercise the rejection path (submit into a session deleted server-side → single re-resolve, honest
+      error row, draft restored).
+
+## 11. Wheel + voice wiring (device blocker #3 — hold does nothing)
+
+Root cause: `hw/WheelTalk.kt` was ported but nothing instantiates it and no screen claims a key, so
+the SDK forwards every notch/click to LightOS. LightOS also hands keys to the screen first, so a
+tool can take the wheel itself.
+
+- [ ] 11.1 Implement the SDK key handler on the thread (and Sessions): claim `WHEEL_CCW`, `WHEEL_CW`, `WHEEL_CLICK`, `FOCUS`, `CAMERA` on DOWN and UP, return true, and feed them into one `WheelTalk` instance hoisted in the screen's view model so holds survive recomposition.
+- [ ] 11.2 Wire the three actions: click = send composed text / stop running turn; hold = start take, release = submit stitched transcript via `prompt.submit`; turn while held = cancel take; bare turn = scroll the thread.
+- [ ] 11.3 Request `RECORD_AUDIO` on first voice use; on denial show one line naming LightOS Settings; never capture before the grant.
+- [ ] 11.4 Diagnostics readout (long-press the thread status line): clicks seen, turns seen, mic granted, whether BrightControl is installed, and one suggested fix line when clicks are zero.
+- [ ] 11.5 Unit tests: click vs hold split at HOLD_MS, turn-while-held cancels, key handler claims only the wheel keys and passes Back/Home through.
+- [ ] 11.6 Document in AGENTS.md and the release notes: BrightControl's per-app rule for `dev.loosewire.hermeslight` must be **Off** (hands-off) so the click and camera reach the app; `com.thelightphone.*` and `com.gios.*` are hands-off by default, ours is not.
+
+## 12. Menu page v2 (owner request: back, but filled out)
+
+- [ ] 12.1 Home top bar: single **Menu** action (History/Bots actions removed).
+- [ ] 12.2 Menu page: status block (connected + model + session count), rows History / Bots / Cron / Settings / About, each with a live count where one exists (`Cron · 0 jobs`), Light row style.
+- [ ] 12.3 Menu lists the three most recent sessions below the rows; each opens its thread; Back walks Thread → Sessions → Menu → Home.
+- [ ] 12.4 Version bump to 0.2.1 (code 105) and gates green.

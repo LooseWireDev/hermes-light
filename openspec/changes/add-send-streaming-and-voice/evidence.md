@@ -212,3 +212,31 @@ Unverified on device: approval and clarify row sets (no deterministic trigger fr
 spending an approval-gated tool call), and dictation (AVD has no speech recognizer — covered by the
 DictationTake unit tests, including the 3-minute synthetic take). Both stay open for the physical
 phone pass on alpha4.
+
+## 2026-11-27 — device probe of task group 10 (M1.2), emulator `mealforge_lpi3_ui_test_v1`
+
+Environment: emulator-5584 (1080×1240 @ 420dpi = 411×472dp), `com.mealforge.lightphone` disabled,
+`adb reverse tcp:9121 tcp:9121`, dashboard `--host 127.0.0.1 --port 9121` (token mode), app
+`dev.loosewire.hermeslight` 0.2.0 (versionCode 104) built from `2adfcc9`.
+
+Setup: no live session was probed by proxy — the app's current row is the operator's own conversation,
+so an isolated session (`m12-probe-*`) was seeded through the gateway first and the phone drove that.
+
+PASS — the M1.2 chain works on device:
+- Thread open resolved descendant → resume, and `prompt.submit` was accepted; the phone's text landed in
+  the intended stored session (server `messages`: user `probe m12 reply with exactly m12-ok`,
+  assistant `m12-ok`).
+- Streaming rendered live: `· reasoning` row, then the reply delta with a caret.
+- Correct runtime on the server: `model=deepseek-v4.1-flash provider=opencode-go`,
+  `tui turn finished: status=complete`, 6.0 s.
+- Cold start rehydrated the transcript correctly (`m12-ok`, no caret, no Stop).
+
+FAIL — task group 11 (new): the terminal event never cleared live state. Server logged
+`tui turn finished: status=complete` at 06:54:25; at 06:56:17 the same thread still showed
+`m12-ok ▏` plus `· Stop`, and the Sessions row still read `● live`. Leaving the thread and reopening it
+did not clear it; only `am force-stop` did. Because 10.3 logs RPC *failures* only, the app produced no
+logcat trace of the missed event.
+
+Also observed (not defects): the seeded "Test session" row 404s honestly (`Not found on the dashboard
+(HTTP 404)`) because that transcript no longer exists; the microphone-permission row is the expected
+AVD state with no dictation available.
