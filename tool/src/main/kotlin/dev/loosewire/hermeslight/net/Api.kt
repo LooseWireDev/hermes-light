@@ -71,7 +71,7 @@ class Api(
         val body =
             getJson(
                 endpoint,
-                "api/sessions",
+                emptyList(),
                 mapOf(
                     "limit" to limit.toString(),
                     "offset" to offset.toString(),
@@ -149,6 +149,20 @@ class Api(
         )
     }
 
+    /** The newest session leaf; never substitute the stored id on a failed resolution. */
+    suspend fun latestDescendant(
+        endpoint: Endpoint,
+        id: String,
+        profile: String? = null,
+    ): String {
+        val body = getJson(endpoint, sessionPath(id) + "latest-descendant", mapOf("profile" to profile))
+        return decode<LatestDescendantWire>(body).session_id?.takeIf { it.isNotBlank() }
+            ?: throw ApiException(
+                message = "Dashboard did not return the session's current id",
+                kind = ApiErrorKind.INVALID_RESPONSE,
+            )
+    }
+
     suspend fun messages(
         endpoint: Endpoint,
         id: String,
@@ -163,7 +177,7 @@ class Api(
         val body =
             getJson(
                 endpoint,
-                "${sessionPath(id)}/messages",
+                sessionPath(id) + "messages",
                 mapOf(
                     "limit" to limit.toString(),
                     "offset" to offset.toString(),
@@ -215,7 +229,7 @@ class Api(
         val body =
             getJson(
                 endpoint,
-                "${sessionPath(id)}/messages/around",
+                sessionPath(id) + listOf("messages", "around"),
                 mapOf(
                     "row_id" to rowId.toString(),
                     "limit" to limit.toString(),
@@ -245,10 +259,12 @@ class Api(
 
     private suspend fun getJson(
         endpoint: Endpoint,
-        path: String,
+        path: List<String>,
         query: Map<String, String?>,
     ): String {
-        val url = endpoint.buildUrl(path, query).toString()
+        val builderUrl = endpoint.buildUrl("api/sessions", query).newBuilder()
+        path.forEach { builderUrl.addPathSegment(it) }
+        val url = builderUrl.build().toString()
         val builder =
             Request
                 .Builder()
@@ -299,9 +315,9 @@ class Api(
         return ApiException(message = message, kind = kind, httpCode = code)
     }
 
-    private fun sessionPath(id: String): String {
+    private fun sessionPath(id: String): List<String> {
         require(id.isNotBlank()) { "Session id must not be blank" }
-        return "api/sessions/$id"
+        return listOf(id)
     }
 
     private fun toTranscriptMessage(
@@ -391,6 +407,11 @@ class Api(
         private const val AROUND_SYNTHETIC_BASE: Long = 1_000_000_000L
     }
 }
+
+@Serializable
+private data class LatestDescendantWire(
+    val session_id: String? = null,
+)
 
 @Serializable
 private data class SessionListWire(

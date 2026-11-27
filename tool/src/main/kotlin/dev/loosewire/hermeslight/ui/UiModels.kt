@@ -77,7 +77,6 @@ data class SessionsUi(
     val hasMore: Boolean = true,
     val loading: Boolean = false,
     val loadError: String? = null,
-    val newSessionEnabled: Boolean = false,
     val status: StatusLineModel = StatusLineModel(""),
 )
 

@@ -17,6 +17,7 @@ import dev.loosewire.hermeslight.net.GatewayRpcException
 import dev.loosewire.hermeslight.net.GatewayState
 import dev.loosewire.hermeslight.net.ProbeResult
 import dev.loosewire.hermeslight.net.RpcFailureKind
+import dev.loosewire.hermeslight.net.SessionRuntime
 import dev.loosewire.hermeslight.net.SignInResult
 import dev.loosewire.hermeslight.net.TicketResult
 import dev.loosewire.hermeslight.net.WsAuthParam
@@ -107,6 +108,7 @@ internal class AppController(
     private val refreshJobs = mutableMapOf<String, Job>()
     private var attentionJob: Job? = null
     private val api = Api(client, tokenProvider = { profile?.takeIf { it.authMode == AuthMode.TOKEN }?.token })
+    private var sessionRuntime: SessionRuntime? = null
     private val auth = Auth(client)
     private val saveMutex = Mutex()
     private var handshake: CompletableDeferred<Unit>? = null
@@ -240,6 +242,7 @@ internal class AppController(
     ) {
         val epoch = ++connectionEpoch
         gateway.disconnect()
+        sessionRuntime = null
         mutable.update { it.copy(connecting = true, status = "connecting…", operationError = null) }
         try {
             withTimeout(25_000) {
@@ -307,6 +310,18 @@ internal class AppController(
                 handshake?.await()
                 if (persist) withContext(Dispatchers.IO) { saveMutex.withLock { store.save(authenticated) } }
                 profile = authenticated
+                sessionRuntime =
+                    SessionRuntime(
+                        resolve = { session ->
+                            val id = api.latestDescendant(endpoint, session, selectedProfile(authenticated))
+                            check(epoch == connectionEpoch) { "Connection changed before the prompt was sent" }
+                            id
+                        },
+                        request = { params ->
+                            check(epoch == connectionEpoch) { "Connection changed before the prompt was sent" }
+                            gateway.request("prompt.submit", params)
+                        },
+                    )
                 mutable.update {
                     it.copy(
                         configured = true,
@@ -626,6 +641,7 @@ internal class AppController(
     ) {
         if (text.isBlank()) return
         val saved = profile ?: return
+        val runtime = sessionRuntime ?: return
         val epoch = connectionEpoch
         val needsBaseline = mutable.value.threadHasNewer
         val id = "phone-${++nextPromptId}"
@@ -680,15 +696,7 @@ internal class AppController(
                         ?.prompts
                         ?.firstOrNull { it.id == id }
                         ?.queued == true
-                val result =
-                    gateway.request(
-                        "prompt.submit",
-                        buildJsonObject {
-                            put("session_id", session)
-                            put("text", text.trim())
-                            if (queued) put("queued", true)
-                        },
-                    )
+                val result = runtime.submit(session, text.trim(), queued)
                 updateConversation(session) { it.submitResult(id, result) }
             } catch (error: CancellationException) {
                 throw error
@@ -760,7 +768,7 @@ internal class AppController(
         updateConversation(session) { it.copy(running = true).beginStop() }
         scope.launch {
             try {
-                gateway.request("session.interrupt", buildJsonObject { put("session_id", session) })
+                gateway.request("session.interrupt", buildJsonObject { put("session_id", runtimeId(session)) })
                 updateConversation(session) { it.stopResult() }
             } catch (error: CancellationException) {
                 throw error
@@ -779,7 +787,7 @@ internal class AppController(
                 ?.prompts
                 ?.firstOrNull { it.id == id } ?: return
         if (prompt.status != PromptStatus.QUEUED) return
-        val params = prompt.cancelParams(session) ?: return
+        val params = prompt.cancelParams(runtimeId(session)) ?: return
         updateConversation(session) { it.cancelQueued(id) }
         scope.launch {
             try {
@@ -803,7 +811,7 @@ internal class AppController(
         approval: ApprovalDecision,
         choice: String,
     ) {
-        val params = approval.respondParams(choice, session) ?: return
+        val params = approval.respondParams(choice, runtimeId(approval.request.sessionId ?: session)) ?: return
         val id = approval.request.requestId
         updateConversation(session) { it.markApprovalSending(id, choice) }
         scope.launch {
@@ -831,7 +839,7 @@ internal class AppController(
         clarify: ClarifyDecision,
     ) {
         if (clarify.questions().any { it.id !in clarify.lockedAnswers && clarify.answerFor(it.id).isNullOrBlank() }) return
-        val calls = clarify.responseCalls(session)
+        val calls = clarify.responseCalls(runtimeId(clarify.request.sessionId ?: session))
         if (calls.isEmpty()) return
         updateConversation(session) { it.markClarifySending(clarify.request.clarifyId) }
         scope.launch {
@@ -860,7 +868,7 @@ internal class AppController(
                         entries
                             .mapNotNull { item ->
                                 val row = item as? JsonObject ?: return@mapNotNull null
-                                val id = (row["session_key"] as? JsonPrimitive)?.content ?: return@mapNotNull null
+                                val id = (row["session_key"] as? JsonPrimitive)?.content?.let(::storedId) ?: return@mapNotNull null
                                 val status = (row["status"] as? JsonPrimitive)?.content
                                 id.takeIf { status in LIVE_STATUSES }
                             }.toSet()
@@ -887,7 +895,7 @@ internal class AppController(
                         val result =
                             gateway.request(
                                 "approval.pending",
-                                buildJsonObject { put("session_id", session) },
+                                buildJsonObject { put("session_id", runtimeId(session)) },
                             )
                         val approvals =
                             (result as? JsonObject)?.get("approvals") as? JsonArray
@@ -974,16 +982,21 @@ internal class AppController(
             }
     }
 
+    private fun runtimeId(session: String): String = sessionRuntime?.runtimeId(session) ?: session
+
+    private fun storedId(session: String): String = sessionRuntime?.storedId(session) ?: session
+
     private fun receive(event: GatewayEvent) {
-        event.sessionId?.let { eventRevisions[it] = (eventRevisions[it] ?: 0L) + 1 }
-        mutable.update { reduceGatewayEvent(it, event) }
+        val session = event.sessionId?.let(::storedId)
+        session?.let { eventRevisions[it] = (eventRevisions[it] ?: 0L) + 1 }
+        mutable.update { reduceGatewayEvent(it, event, session) }
         if ((event is GatewayEvent.Done || event is GatewayEvent.MessageDone || event is GatewayEvent.Failure) &&
-            event.sessionId == mutable.value.selectedSession
+            session == mutable.value.selectedSession
         ) {
-            event.sessionId?.let(::refreshLatest)
+            session?.let(::refreshLatest)
         }
         val waiting =
-            mutable.value.desktopNotices[event.sessionId]
+            mutable.value.desktopNotices[session]
                 .orEmpty()
                 .any { !it.clarification }
         if (event is GatewayEvent.ApprovalPending || event is GatewayEvent.ApprovalReceived ||

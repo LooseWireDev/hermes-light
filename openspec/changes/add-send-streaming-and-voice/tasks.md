@@ -78,7 +78,7 @@ the wheel to talk — as long as you like, because dictation is chunked and stit
 
 ## 9. M1.1 — live-id resolution (device blocker)
 
-- [ ] 9.1 Before `prompt.submit`, resolve the session's current id via `GET api/sessions/{id}/latest-descendant`; cache per session; on `4001 session not found` re-resolve once and retry, then surface a specific error.
-- [ ] 9.2 Audit every session-id path (`messages`, `messages/around`, `latest-descendant`, `session.interrupt`, approval/clarify payloads) for URL-encoding of ids containing `/`.
-- [ ] 9.3 Sessions screen: replace the stale "sending arrives in M1" subtitle with honest copy (`New session` with today's behavior), or wire `session.create` if the method is available and trivial.
-- [ ] 9.4 Unit tests for the resolve-then-submit path (including one 4001 retry) and id encoding.
+- [x] 9.1 Before `prompt.submit`, resolve the session's current id via `GET api/sessions/{id}/latest-descendant`; cache per session; on `4001 session not found` re-resolve once and retry, then surface a specific error.
+- [x] 9.2 Audit every session-id path (`messages`, `messages/around`, `latest-descendant`, `session.interrupt`, approval/clarify payloads) for URL-encoding of ids containing `/`.
+- [x] 9.3 Sessions screen: replace the stale "sending arrives in M1" subtitle with honest copy (`New session` with today's behavior), or wire `session.create` if the method is available and trivial.
+- [x] 9.4 Unit tests for the resolve-then-submit path (including one 4001 retry) and id encoding.

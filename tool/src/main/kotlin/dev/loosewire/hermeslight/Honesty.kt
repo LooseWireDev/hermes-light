@@ -20,26 +20,26 @@ internal fun connectionLabel(state: GatewayState): String =
         is GatewayState.AuthFailed -> "error: ${state.message}"
     }
 
-/** Session identity comes from the frame, never from whichever screen happens to be open. */
+/** Identity comes from the frame, optionally mapped to its stored id, never the open screen. */
 internal fun reduceGatewayEvent(
     state: AppState,
     event: GatewayEvent,
+    session: String? = event.sessionId,
 ): AppState {
-    val session = event.sessionId
     val updated =
         if (session == null) {
             state
         } else {
             state.copy(conversations = state.conversations + (session to (state.conversations[session] ?: Conversation()).reduce(event)))
         }
-    return reduceAttention(updated, event)
+    return reduceAttention(updated, event, session)
 }
 
 private fun reduceAttention(
     state: AppState,
     event: GatewayEvent,
+    session: String?,
 ): AppState {
-    val session = event.sessionId
     val key = session ?: GLOBAL_NOTICE
     val origin = session ?: "dashboard — session unspecified"
 

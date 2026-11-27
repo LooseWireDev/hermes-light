@@ -117,3 +117,36 @@ client resolves it with `GET api/sessions/{id}/latest-descendant` and URL-encode
 contain `/`). Fix in M1.1: resolve descendant before submit, cache, re-resolve once on 4001, and
 audit all session-id path encoding. Streaming and approvals remain unverified until a submit is
 accepted.
+
+## 2026-11-27 — task group 9: M1.1 live-id resolution
+
+- `SessionRuntime` resolves `GET api/sessions/{stored-id}/latest-descendant` before the first
+  `prompt.submit`, caches per stored id within the authenticated connection, and refreshes/retries
+  once only after an explicit rejected RPC with code 4001 and `session not found`. A second such
+  rejection reports “Session not found after refreshing its current id”; the existing failed-row
+  and draft-restoration path handles it. Timeout/lost-socket outcomes never trigger a resend.
+- REST session detail, messages, messages/around and latest-descendant append ids with OkHttp
+  `addPathSegment`, encoding `/` and reserved characters once while retaining proxy prefixes.
+  JSON session ids remain raw for submit, interrupt, cancellation and approval/clarify calls.
+  Runtime pushes/active snapshots map back to stored conversation keys; reply payloads retain the
+  original runtime identity. Old aliases remain until connection replacement for late events.
+- The disabled New session row now says “create on desktop for now”; no creation RPC or UI added.
+- Regression coverage: descendant submit/cache isolation, a single 4001 retry, bounded repeated
+  rejection/draft restoration, no retry for unknown outcomes or unrelated errors, failed resolution
+  without submit, slash/reserved-character REST paths, and runtime-to-stored stream routing.
+- Reference checkout was read only. `SessionOpsResponses.LatestDescendantResponse` defines the
+  `session_id` response, and `ActiveSessionHolder` distinguishes stored/runtime identity.
+  Attribution is retained in derived sources and `NOTICE`.
+- Local/development lane; unchanged owner SDK `main` at
+  `251237ef3778c907c5dbd89e84685532c9d99a28`, including its pre-existing edits. No dependency,
+  metadata, version, signing or SDK changes. No adb/emulator, live gateway, install, upload or push.
+  Device confirmation of the send blocker and LP3 copy/layout remains outstanding; no visual
+  acceptance or accepted-spec sync is claimed.
+- Canonical Obsidian vault remains unavailable (`/home/gav/Documents/obsidian-vault/Home.md`
+  not found); this note records the intended durable project update instead.
+- Verification after the last code edit, using the requested Android/JDK environment and
+  `-Porg.gradle.java.installations.paths="$HOME/.local/share/light-tern-toolchain/jdk17,$HOME/.local/opt/temurin21"`:
+  `./gradlew ktlintCheck checkColorLiterals :tool:testDebugUnitTest :tool:assembleDebug --continue --console=plain`
+  — **BUILD SUCCESSFUL in 4s; 148 tests across 20 files, zero failures/errors/skips**.
+  The first run found one ktlint chain-wrapping issue; it was fixed before this final green run.
+  Debug artifact: `tool/build/outputs/apk/debug/tool-debug.apk`.

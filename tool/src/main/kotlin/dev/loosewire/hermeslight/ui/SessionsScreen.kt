@@ -38,7 +38,7 @@ import kotlinx.coroutines.flow.filter
 private const val PAGING_THROTTLE_MS = 250L
 
 /**
- * Sessions: recent sessions, a disabled M1 "New session" row, and Bots as the footer row.
+ * Sessions: recent sessions, a disabled desktop-only "New session" row, and Bots as the footer row.
  *
  * The wheel reaches the last loaded session; turning past it asks for the next page and stays
  * put. A failed fetch stays retryable with the same gesture. Position is reported as an index
@@ -160,7 +160,7 @@ fun SessionsScreen(
                     maxLines = 1,
                 )
                 LightText(
-                    text = if (state.newSessionEnabled) "ready" else "sending arrives in M1",
+                    text = "create on desktop for now",
                     variant = LightTextVariant.Superfine,
                 )
             }

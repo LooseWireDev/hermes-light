@@ -9,6 +9,8 @@ Tool envelope/name resolution and completed-result status handling follow Hermes
 ToolResultParser and ToolStatusResolver contracts.
 Prompt admission/cancellation receipts, explicit approval replies and canonical/legacy clarify
 reply shapes follow Hermes Mobile's WebSocket contracts; no Hermes Mobile UI was copied.
+Latest-descendant response handling and stored/runtime session identity follow Hermes Mobile's
+SessionOpsResponses and ActiveSessionHolder contracts.
 
 Light SDK and its dependencies retain their respective licenses.
 BrightHermes patterns are reused with the owner's permission.

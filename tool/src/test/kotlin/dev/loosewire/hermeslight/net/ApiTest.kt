@@ -16,6 +16,50 @@ import kotlin.test.assertTrue
 
 class ApiTest {
     @Test
+    fun `session ids are single encoded path segments for every REST operation`() =
+        runBlocking {
+            val paths = Collections.synchronizedList(mutableListOf<String>())
+            TestHttpServer { exchange ->
+                paths.add(exchange.requestURI.rawPath)
+                val body =
+                    when {
+                        exchange.requestURI.path.endsWith("/latest-descendant") -> """{"session_id":"current/leaf"}"""
+                        exchange.requestURI.path.endsWith("/messages/around") -> """{"messages":[]}"""
+                        exchange.requestURI.path.endsWith("/messages") -> """{"messages":[]}"""
+                        else -> """{"session_id":"stored/branch %?#"}"""
+                    }
+                exchange.respondJson(200, body)
+            }.use { server ->
+                val api = Api(newHttpClient())
+                val endpoint = Endpoint.parse("${server.baseUrl}dashboard/")
+                val id = "stored/branch %?#"
+                assertEquals(id, api.session(endpoint, id).id)
+                api.messages(endpoint, id)
+                api.messagesAround(endpoint, id, rowId = 1)
+                assertEquals("current/leaf", api.latestDescendant(endpoint, id))
+                val prefix = "/dashboard/api/sessions/stored%2Fbranch%20%25%3F%23"
+                assertEquals(
+                    listOf(prefix, "$prefix/messages", "$prefix/messages/around", "$prefix/latest-descendant"),
+                    paths.toList(),
+                )
+            }
+        }
+
+    @Test
+    fun `latest descendant requires a nonblank current id`() =
+        runBlocking {
+            for (body in listOf("{}", """{"session_id":""}""", """{"session_id":" "}""")) {
+                TestHttpServer { it.respondJson(200, body) }.use { server ->
+                    val failure =
+                        assertFailsWith<ApiException> {
+                            Api(newHttpClient()).latestDescendant(Endpoint.parse(server.baseUrl), "stored")
+                        }
+                    assertEquals(ApiErrorKind.INVALID_RESPONSE, failure.kind)
+                }
+            }
+        }
+
+    @Test
     fun `sessions page maps rows, paging, and token auth`() =
         runBlocking {
             val requests = Collections.synchronizedList(mutableListOf<String>())

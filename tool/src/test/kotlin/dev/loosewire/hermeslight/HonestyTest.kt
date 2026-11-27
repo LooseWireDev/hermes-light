@@ -9,6 +9,24 @@ import kotlin.test.assertTrue
 
 class HonestyTest {
     @Test
+    fun `runtime pushes update the stored conversation without changing reply identity`() {
+        val started = reduceGatewayEvent(AppState(), GatewayEvent.MessageStart("turn", "runtime/leaf"), "stored/root")
+        val streamed = reduceGatewayEvent(started, GatewayEvent.MessageDelta("answer", "runtime/leaf"), "stored/root")
+        assertEquals(setOf("stored/root"), streamed.liveSessions)
+        assertEquals(
+            "answer",
+            streamed.conversations
+                .getValue("stored/root")
+                .stream
+                ?.text,
+        )
+        assertFalse("runtime/leaf" in streamed.conversations)
+        val done = reduceGatewayEvent(streamed, GatewayEvent.Done("runtime/leaf"), "stored/root")
+        assertTrue(done.liveSessions.isEmpty())
+        assertFalse(done.conversations.getValue("stored/root").running)
+    }
+
+    @Test
     fun `message completion cannot pretend the turn is done`() {
         val started = reduceGatewayEvent(AppState(), GatewayEvent.MessageStart("turn", "a"))
         val completed = reduceGatewayEvent(started, GatewayEvent.MessageComplete("answer", null, false, "a"))
