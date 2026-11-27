@@ -300,3 +300,20 @@ turn cancel, missing/orphan UP, lifecycle reset, shutter cancellation, list mode
 both key halves and Back/Home fallthrough; Menu back-chain/focus and authenticated Cron count/
 unavailable responses. Debug APK: `tool/build/outputs/apk/debug/tool-debug.apk`.
 Existing SDK publication and compile-SDK warnings remain. No UI/device acceptance is claimed.
+
+## 2026-11-27 — M1.3 device acceptance (wheel claim + Menu v2)
+
+Signed 0.2.1 (code 105) on the LP3 AVD, loopback dashboard, BrightControl not installed on the AVD.
+
+- Menu v2: Home top bar shows a single `Menu`; the page opens with a status block (`connected`,
+  `801 sessions · 1 bot`) and rows `History / Bots / Cron / Settings / About` with live counts
+  (`Cron · 0 jobs`, `About · v0.2.1`), then `RECENT SESSIONS` with three rows that open threads.
+- Wheel claim: `adb shell input keyevent 19` ×10 on a thread scrolled it to earlier rows
+  (`· terminal — ok`, `· reasoning`, `· skill_manage — ok` appeared). The notches are claimed by the
+  screen, not forwarded — this is the same key path the phone uses, so the only remaining variable on
+  device is BrightControl's per-app rule (owner confirmed: setting the app to Off in Controls makes
+  the wheel press work).
+- Owner report after alpha4 (before this build): with the app set to Off in Controls, the wheel works;
+  voice produced no engine — see task group 13.
+- Defect (cosmetic): the status block reads `Model unavailable` when no session is open; it should
+  name the model when known and stay quiet otherwise.
