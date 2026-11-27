@@ -120,6 +120,8 @@ data class ThreadMessageUi(
     val expandableText: String? = null,
     /** Label for an unsupported attachment/media block, e.g. "image: diagram.png". */
     val mediaLabel: String? = null,
+    /** Explicit row activation; null retains transcript expansion/timestamp behavior. */
+    val action: String? = null,
 )
 
 enum class ThreadNoticeKind {
@@ -160,6 +162,8 @@ data class ThreadUi(
     val error: String? = null,
     val emptyText: String = "No messages yet.",
     val status: StatusLineModel = StatusLineModel(""),
+    val composer: String = "",
+    val running: Boolean = false,
 )
 
 data class ThreadActions(
@@ -168,6 +172,9 @@ data class ThreadActions(
     val onPositionChanged: (ThreadPosition) -> Unit = {},
     val onBack: () -> Unit = {},
     val onLongBack: () -> Unit = {},
+    val onDraftChange: (String) -> Unit = {},
+    val onSubmit: (String) -> Unit = {},
+    val onAction: (String) -> Unit = {},
 )
 
 // -- Bots -----------------------------------------------------------------------------------------

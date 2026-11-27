@@ -65,6 +65,7 @@ class ThreadReader internal constructor(
 
     private val expanded = mutableStateMapOf<String, Boolean>()
     private val timestamps = mutableStateMapOf<String, Boolean>()
+    internal var onAction: (String) -> Unit = {}
 
     fun focusedMessage(): ThreadMessageUi? {
         val current = messages
@@ -144,6 +145,10 @@ class ThreadReader internal constructor(
 
     fun activate(): Boolean {
         val message = focusedMessage() ?: return false
+        message.action?.let {
+            onAction(it)
+            return true
+        }
         val external = onActivate
         if (external != null) {
             external(message)
@@ -238,6 +243,7 @@ fun rememberThreadReader(
     position: ThreadPosition?,
     onPositionChanged: (ThreadPosition) -> Unit,
     onActivate: ((ThreadMessageUi) -> Unit)? = null,
+    onAction: (String) -> Unit = {},
 ): ThreadReader {
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
@@ -247,6 +253,7 @@ fun rememberThreadReader(
     val currentPosition = rememberUpdatedState(position)
     val currentPositionCallback = rememberUpdatedState(onPositionChanged)
     val currentActivate = rememberUpdatedState(onActivate)
+    val currentAction = rememberUpdatedState(onAction)
     var restored by remember(sessionId) { mutableStateOf(false) }
     var restoreSettled by remember(sessionId) { mutableStateOf(false) }
     var anchorId by remember(sessionId) { mutableStateOf<String?>(null) }
@@ -258,6 +265,7 @@ fun rememberThreadReader(
         reader.messages = currentMessages.value
         reader.onPositionChanged = currentPositionCallback.value
         reader.onActivate = currentActivate.value
+        reader.onAction = currentAction.value
     }
 
     LaunchedEffect(sessionId, messages.isNotEmpty()) {
@@ -322,11 +330,15 @@ fun rememberThreadReader(
     }
 
     var latestId by remember(sessionId) { mutableStateOf<String?>(null) }
-    LaunchedEffect(messages.lastOrNull()?.id) {
+    var latestLiveText by remember(sessionId) { mutableStateOf<String?>(null) }
+    val liveText = messages.firstOrNull { it.id == "live:assistant" }?.body
+    LaunchedEffect(messages.lastOrNull()?.id, liveText) {
         val id = messages.lastOrNull()?.id ?: return@LaunchedEffect
         val previous = latestId
         latestId = id
-        if (previous != null && previous != id && atBottom) {
+        val grew = latestLiveText != null && latestLiveText != liveText
+        latestLiveText = liveText
+        if (previous != null && (previous != id || grew) && atBottom) {
             reader.scrollToBottom()
         }
     }
@@ -484,7 +496,7 @@ private fun ThreadMessageRow(
                     text = summary,
                     variant = LightTextVariant.Detail,
                     color = colors.content,
-                    maxLines = 2,
+                    maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
                 if (expanded) {

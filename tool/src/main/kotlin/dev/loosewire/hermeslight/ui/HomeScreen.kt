@@ -39,6 +39,7 @@ fun HomeScreen(
             position = thread.position,
             onPositionChanged = actions.threadActions.onPositionChanged,
             onActivate = { message -> actions.onOpenThread(message.id) },
+            onAction = actions.threadActions.onAction,
         )
     var focus by remember(thread.sessionId) {
         mutableStateOf(if (thread.messages.isEmpty()) HomeWheelFocus.History else HomeWheelFocus.Thread)

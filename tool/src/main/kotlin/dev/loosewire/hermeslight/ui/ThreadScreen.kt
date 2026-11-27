@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Modifier
 import com.thelightphone.sdk.ui.LightBarButton
 import com.thelightphone.sdk.ui.LightIcons
@@ -22,7 +23,7 @@ import dev.loosewire.hermeslight.ui.common.WheelScroll
 import dev.loosewire.hermeslight.ui.common.rememberThreadReader
 
 /**
- * A full session transcript. Read-only in M0.
+ * A full session transcript with explicit prompt and blocking-decision actions.
  *
  * Wheel-up at the oldest loaded row asks for an older window; wheel-down at the newest loaded
  * row asks for a newer window when a restored position left history on both sides. A failed
@@ -41,7 +42,19 @@ fun ThreadScreen(
             messages = state.messages,
             position = state.position,
             onPositionChanged = actions.onPositionChanged,
+            onAction = actions.onAction,
         )
+
+    val firstDecision =
+        state.messages.firstOrNull {
+            it.action?.startsWith("approval:") == true || it.action?.startsWith("clarify:") == true
+        }
+    LaunchedEffect(firstDecision?.id) {
+        if (firstDecision != null) {
+            reader.focusOn(firstDecision.id)
+            reader.listState.scrollToItem(state.messages.indexOf(firstDecision))
+        }
+    }
 
     WheelScroll(
         onUp = {
