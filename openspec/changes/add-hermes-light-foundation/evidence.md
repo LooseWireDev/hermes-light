@@ -54,3 +54,27 @@ Defects found (fix before M1 completes):
 
 Untested here: Bots screen, dashboard-loss recovery line, encrypted-store cold restart with a stored
 profile, real-phone install (M0 task 5.2).
+
+## 2026-11-26 — M0.1 menu and acceptance fixes
+
+Implemented 6.1–6.4: full SDK Menu page (Chat / History / Bots / disabled Cron / Settings), Home
+Menu action and deck-top wheel entry, SDK back chain Thread → Sessions → Menu → Home, and Chat
+returning to the existing Home/session/read anchor. Setup now holds an editable default endpoint
+without saving a profile. Tool result rows resolve names from row/envelope metadata or assistant
+call ids, show `ok` / `fail` (`unknown` for absent results), and only fall back to call ids when
+names are unavailable. Secondary text moves from `contentSecondary` to the SDK's next `content`
+tone; disabled titles and dividers retain the secondary tone. No new color literals or M1 features.
+
+Verification after the final code edit:
+- With `ANDROID_HOME=$HOME/.local/share/light-tern-toolchain/android-sdk`, `JAVA_HOME=$HOME/.local/opt/temurin21`, and Java 21 on `PATH`:
+  `./gradlew -Porg.gradle.java.installations.paths="$HOME/.local/share/light-tern-toolchain/jdk17,$HOME/.local/opt/temurin21" ktlintCheck checkColorLiterals :tool:testDebugUnitTest :tool:assembleDebug --continue --console=plain` — **BUILD SUCCESSFUL**; **61 tests, zero failures/errors/skips**.
+- Nine new tests cover Menu/back routing, direct Home-to-Thread parents, Chat without a duplicate
+  Home, bot/Settings navigation, cold-start endpoint seeding without persistence, explicit endpoint
+  deletion, tool outcomes/names/fallbacks, and tool-name resolution after older-page loading.
+- Initial gate run found only ktlint filename/signature/chain formatting issues; corrected before
+  the successful run. Existing SDK publication and compile-SDK-37 warnings remain unchanged.
+- Debug artifact: `tool/build/outputs/apk/debug/tool-debug.apk`; local/development composite SDK
+  `main` at `251237ef3778c907c5dbd89e84685532c9d99a28`, pre-existing SDK changes untouched.
+
+No adb, emulator driving, screenshots, device install or live-dashboard check performed, as requested.
+Parent still owns LP3-shaped Menu/back/scroll and contrast acceptance; visual boxes remain unchecked.
