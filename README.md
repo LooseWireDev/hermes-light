@@ -9,7 +9,7 @@ thumb-and-wheel device can actually carry.
 Hermes Light is not a port. It is a small, purpose-built client:
 
 - **Conditional status strip** — one line for running turns and pending notices; zero height when idle.
-- **Thread below** — read and send in any session, streamed live; **hold the wheel** to talk.
+- **Thread below** — read and send in any session, streamed live. Voice runtime remains blocked (below).
 - **Wheel-first** — scroll, page, open, back; no chrome, no chip rows, no sheets that eat the screen.
 
 ## Lineage
@@ -25,11 +25,15 @@ Reuse and attribution rules live in `AGENTS.md`; the protocol surface is documen
 
 ## Status
 
-M0.3 implementation: dashboard setup with explicit credential Paste actions, encrypted connection
-profile, Home top-bar History/Bots actions, recent sessions and source/profile selection, and
-read-only paged transcripts. The conditional strip opens pending approvals/clarifications or a
-running session; approvals remain desktop-only. Socket status stays visible. No menu page or deck
-placeholder. Sending, streaming rendering and voice are **not implemented in M0**.
+M1 implementation adds the SDK composer, pending/queued sends, streaming replies, stop/cancel and
+explicit inline approval/clarify decisions to M0.3's paged transcripts and encrypted connection
+profile. The status strip follows live turn and approval state; remembered-session 404s return to
+History without a raw error. No menu page, deck placeholder or Material chrome.
+
+**Voice is not accepted:** the current BrightHermes port source is an offline sherpa-onnx/Parakeet
+pipeline, not `SpeechRecognizer`, and caps takes at five minutes. Preserving that source while
+providing the required runtime needs an owner decision; see the M1 evidence and unchecked tasks.
+No emulator/phone verification or alpha4 publication is implied.
 
 ## Local build
 
@@ -69,7 +73,7 @@ developer inbox HMAC protocol, with TLS verification enabled:
 No upload, emulator install or hardware acceptance is implied by a local build. The parent/owner
 must verify the pages and wheel/back behavior on the LP3-shaped emulator, then first connect
 on the real phone. Acceptance and remaining checks live in
-`openspec/changes/add-hermes-light-foundation/{tasks,evidence}.md`.
+`openspec/changes/add-send-streaming-and-voice/{tasks,evidence}.md`.
 
 ## Connection and controls
 
@@ -90,8 +94,11 @@ The strip prioritizes pending approvals, then clarifications, then running sessi
 strip and no reserved space. Setup starts with an editable loopback address, saved only after connection succeeds.
 Tool rows show names (call ids only as a fallback) and outcomes; tool/reasoning rows expand and
 timestamps are available on demand. Secondary text uses the next SDK tone (`content`).
-Approval and clarification notices are read-only: respond on the desktop. No turn or
-approval-response RPC exists in this M0 client.
+In a thread, open Compose and use the SDK editor's SEND/QUEUE action. Sends remain pending until
+gateway evidence, and rejected text returns to the draft with a retry row. Queued cancellation
+uses its admission receipt. Stop waits for gateway completion; a lost RPC reply is outcome-unknown,
+not permission to resend. Approval Yes/No/Always and clarify rows require explicit activation;
+Always appears only when permitted. Nothing answers automatically or on navigation.
 
 Chrome uses SDK widgets only. The annotated transcript-span renderer uses foundation `BasicText`
 because the active SDK's `LightText` accepts only `String`; its typography and colors still come

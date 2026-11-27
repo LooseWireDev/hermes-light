@@ -7,6 +7,10 @@ Apache License, Version 2.0. Original attribution is retained in derived source.
 The Apache-2.0 license is included in LICENSES/Apache-2.0.txt.
 Tool envelope/name resolution and completed-result status handling follow Hermes Mobile's
 ToolResultParser and ToolStatusResolver contracts.
+Prompt admission/cancellation receipts, explicit approval replies and canonical/legacy clarify
+reply shapes follow Hermes Mobile's WebSocket contracts; no Hermes Mobile UI was copied.
 
 Light SDK and its dependencies retain their respective licenses.
 BrightHermes patterns are reused with the owner's permission.
+DictationTake and WheelTalk are ported from the owner's BrightHermes source with permission;
+WheelTalk's private wheel-bus interface is adapted to SDK device keys.
