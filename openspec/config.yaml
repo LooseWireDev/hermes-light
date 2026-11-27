@@ -1,0 +1,16 @@
+schema: spec-driven
+
+context: |
+  Language: English. Keep OpenSpec headings and SHALL/MUST keywords in English.
+  Project: Hermes Light — a Light SDK-native Hermes client for the Light Phone III.
+  Module: :app, package com.gios.hermeslight (owner may confirm the identifier before scaffold).
+  Framework: com.thelightphone.sdk (SealedLightActivity, LightText/LightTopBar/SimpleLightScreen),
+  LightOS wheel input, Jetpack Compose. Material3 only where the SDK has no equivalent.
+  Data: the Hermes dashboard REST contract and its JSON-RPC WebSocket gateway (see
+  docs/research/00-two-apps-and-apis.md). Auth: loopback token mode or gated basic-auth + ws-ticket.
+  Reuse: BrightHermes (owner) freely; Hy4ri/hermes-mobile is Apache-2.0 — keep headers, add NOTICE.
+  Target device: 1080x1240 px @ 420dpi = 411x472dp usable; wheel + thumb input; OLED.
+  Constraints: no seventh screen; no auto-approval; nothing claimed done before the gateway says so;
+  voice (hold-wheel) must never regress. Releases are built and signed locally; Actions stay off.
+  openspec/specs describes evidenced behavior after acceptance; changes holds proposed deltas;
+  openspec/roadmap.md owns sequencing.
