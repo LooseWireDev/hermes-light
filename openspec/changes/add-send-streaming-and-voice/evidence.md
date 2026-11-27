@@ -193,3 +193,22 @@ accepted.
 - Final privacy-hardening verification supersedes the counts above: the same four-gate command
   passed after redacting echoed raw/JSON-escaped request values, overlapping secrets and mixed-case
   credential formats — **BUILD SUCCESSFUL in 6s; 157 tests, zero failures/errors/skips**.
+
+## 2026-11-27 — M1 device acceptance, part 2 (send accepted, streaming, strip)
+
+M1.2 (resume → runtime id) fixed the blocker. Signed 0.2.0 (code 104) on the LP3 AVD, loopback dashboard.
+
+- Send accepted: composing `M1.2 probe` in a live local session produced a delivered `YOU` row (not
+  pending, not duplicated) and a turn started.
+- Streaming: `· reasoning` row and `terminal` tool row appeared while the reply streamed, with the
+  caret `▏` on the assistant row; the final text replaced the caret.
+- Live strip: Home showed exactly one line, `1 running`, during the turn, and the thread still filled
+  the screen. After completion the strip disappeared (zero height, no label) — verified on Home.
+- Sessions copy fixed: `New session / create on desktop for now`.
+- Stale/dead session path (earlier this session): honest ERROR + Retry + draft restored, then a
+  specific message after a second attempt. No false success.
+
+Unverified on device: approval and clarify row sets (no deterministic trigger from the emulator without
+spending an approval-gated tool call), and dictation (AVD has no speech recognizer — covered by the
+DictationTake unit tests, including the 3-minute synthetic take). Both stay open for the physical
+phone pass on alpha4.
