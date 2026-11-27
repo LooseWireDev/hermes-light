@@ -6,7 +6,7 @@ ticking anything visual. Do not start M1 features early (no sending, no voice, n
 ## 1. Scaffold
 
 - [ ] 1.1 New Gradle project: `settings.gradle.kts`, root `build.gradle.kts`, `gradle/libs.versions.toml`, wrapper; Kotlin + Compose + `com.thelightphone.sdk` dependency per light-sdk docs (`docs/building`).
-- [ ] 1.2 `app/build.gradle.kts`: package `com.gios.hermeslight`, compileSdk 37, minSdk 34, ktlint + checkColorLiterals tasks mirroring light-tern; `NOTICE` with the Apache-2.0 attribution for hermes-mobile-derived protocol handling.
+- [ ] 1.2 `tool/build.gradle.kts`: package `dev.loosewire.hermeslight`, module `:tool` per the SDK layout, SDK via includeBuild(../light-sdk/plugin), compileSdk 37, minSdk 34, ktlint + checkColorLiterals tasks mirroring light-tern; `NOTICE` with the Apache-2.0 attribution for hermes-mobile-derived protocol handling.
 - [ ] 1.3 Manifest + `MainActivity : SealedLightActivity`, AMOLED black theme via `LightThemeTokens`, empty Home screen that renders "Hermes Light" and the wheel contract stub.
 - [ ] 1.4 `./gradlew assembleDebug` + install on the LP3 AVD; screenshot of the booting shell.
 
@@ -35,7 +35,7 @@ ticking anything visual. Do not start M1 features early (no sending, no voice, n
 
 ## 5. Install on the phone
 
-- [ ] 5.1 Tool metadata (`lighttool.toml` / LightOS install requirements per light-sdk docs), dev-key signing (new keystore at `~/keys/hermes-light/`, documented in AGENTS.md).
+- [ ] 5.1 Tool metadata complete (`lighttool.toml`, uploadTool task per light-tern), dev-key signing (new keystore at `~/keys/hermes-light/`, documented in AGENTS.md).
 - [ ] 5.2 Debug APK sideloaded to the real LP3 via Tool Manager or Borealis; owner confirms boot + first connect.
 - [ ] 5.3 Evidence: screenshot set in `~/Projects/light/hermes-light-audit/` and a short `evidence.md` appended to this change.
 

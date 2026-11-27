@@ -12,8 +12,10 @@ deck arrive later; M0 proves the data plane and the wheel.
 ## M1 — Thread that behaves
 
 Send, streaming render, tool one-liners, reasoning collapse, approvals and clarify as blocking
-Light-native rows, queue/stop, reconnect honesty. Voice (hold-wheel dictation) carried over from
-BrightHermes.
+Light-native rows, queue/stop, reconnect honesty. **Hold-wheel voice with send** (owner uses it
+outdoors): the BrightHermes pipeline is ported verbatim — `WheelTalk` hold/release/turn-to-cancel,
+`DictationTake` overlapping-window decoding with word-anchor stitching for unbounded recording
+length, `Listener` bounded previews — so long dictation never truncates.
 
 ## M2 — Deck that earns its keep
 

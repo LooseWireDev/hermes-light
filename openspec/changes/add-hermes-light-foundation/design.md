@@ -66,6 +66,24 @@ Wheel contract (identical everywhere):
 - Long transcripts: bottom-anchored list; wheel-up loads `messages/around` in 50-message windows;
   position preserved across session switches (stored per session id).
 
+## Voice input (M1, ported from BrightHermes — owner requirement)
+
+BrightHermes already solves the hard part: **unbounded-length hold-to-talk**. Port, do not reinvent:
+
+- `voice/DictationTake.kt` — the take is a sequence of audio chunks; decoding happens in overlapping
+  windows (`next()`), and `complete()` stitches each window's tokens onto the previous text using a
+  word-anchor search (`findAnchor(words, previous)`), so a ten-minute hold produces one coherent
+  transcript with bounded memory and no duplication at window seams.
+- `voice/Listener.kt` — SpeechRecognizer loop with bounded live previews, a single commit point on
+  release, cancel path, and permission/warmup handling.
+- `hw/WheelTalk.kt` — the physical contract: hold = talk, release = send, turn = cancel; whole panel
+  inverts while listening so it reads in bright sunlight; the hint line doubles as on-screen PTT.
+
+Hermes Light keeps all three behaviours verbatim; the only change is where the finished text goes —
+through the dashboard gateway (`command.dispatch`/turn submission) instead of the bridge's `user`
+frame. Voice MUST remain available on every screen that accepts text (Home/thread), including while
+streaming a reply.
+
 ## Failure and honesty rules
 
 - Every network state has a visible line: `connecting…`, `connected`, `reconnecting (n)`, `error: …`.
@@ -79,12 +97,12 @@ hermes-light/
 ├── AGENTS.md  README.md  NOTICE
 ├── docs/research/00-two-apps-and-apis.md
 ├── openspec/…  (this change)
-├── settings.gradle.kts  build.gradle.kts  gradle/libs.versions.toml  gradlew…
+├── settings.gradle.kts (includeBuild ../light-sdk/plugin)  build.gradle.kts  gradle/libs.versions.toml  gradlew…
 └── app/
-    ├── build.gradle.kts        # :app, package com.gios.hermeslight, minSdk per LP3 (34), target 37
+    ├── build.gradle.kts        # :tool, package dev.loosewire.hermeslight, minSdk per LP3 (34), target 37
     └── src/main/
         ├── AndroidManifest.xml # single activity, tool metadata for LightOS install
-        └── kotlin/com/gios/hermeslight/
+        └── kotlin/dev/loosewire/hermeslight/
             ├── MainActivity.kt ui/{Home,Sessions,Thread,Bots,Setup}Screen.kt
             ├── ui/common/{LightRow,Wheel*,StatusLine}.kt
             ├── net/{Endpoint,Auth,Api,Gateway}.kt

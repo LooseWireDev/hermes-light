@@ -3,7 +3,8 @@ schema: spec-driven
 context: |
   Language: English. Keep OpenSpec headings and SHALL/MUST keywords in English.
   Project: Hermes Light — a Light SDK-native Hermes client for the Light Phone III.
-  Module: :app, package com.gios.hermeslight (owner may confirm the identifier before scaffold).
+  Module: :tool (SDK tool layout, lighttool.toml), package dev.loosewire.hermeslight; repo LooseWireDev/hermes-light.
+  SDK consumed as a local composite build: includeBuild(<lightSdk.path>/plugin), property defaults to ../light-sdk.
   Framework: com.thelightphone.sdk (SealedLightActivity, LightText/LightTopBar/SimpleLightScreen),
   LightOS wheel input, Jetpack Compose. Material3 only where the SDK has no equivalent.
   Data: the Hermes dashboard REST contract and its JSON-RPC WebSocket gateway (see
