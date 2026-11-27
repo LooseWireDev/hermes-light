@@ -18,6 +18,7 @@ import dev.loosewire.hermeslight.net.SignInResult
 import dev.loosewire.hermeslight.net.TicketResult
 import dev.loosewire.hermeslight.net.WsAuthParam
 import dev.loosewire.hermeslight.net.defaultHttpClient
+import dev.loosewire.hermeslight.ui.DEFAULT_ENDPOINT
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
@@ -48,7 +49,7 @@ internal data class AppState(
     val initialized: Boolean = false,
     val configured: Boolean = false,
     val profileVersion: Int = 0,
-    val endpoint: String = "",
+    val endpoint: String = DEFAULT_ENDPOINT,
     val status: String = "connecting…",
     val operationError: String? = null,
     val connecting: Boolean = false,
@@ -128,7 +129,7 @@ internal class AppController(
                             it.copy(
                                 initialized = true,
                                 configured = saved != null,
-                                endpoint = saved?.endpoint.orEmpty(),
+                                endpoint = saved?.endpoint ?: DEFAULT_ENDPOINT,
                                 selectedSession = saved?.selectedSessionId,
                                 selectedBot = saved?.botProfile,
                                 passwordMode = saved?.authMode == AuthMode.PASSWORD,

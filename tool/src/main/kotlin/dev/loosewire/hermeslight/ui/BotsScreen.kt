@@ -189,7 +189,6 @@ fun BotsScreen(
                         LightText(
                             text = detail,
                             variant = LightTextVariant.Superfine,
-                            lighten = true,
                             maxLines = 2,
                             overflow = TextOverflow.Ellipsis,
                         )
@@ -209,7 +208,6 @@ fun BotsScreen(
                             LightText(
                                 text = state.loadError ?: "ask the dashboard for bot profiles",
                                 variant = LightTextVariant.Superfine,
-                                lighten = true,
                                 maxLines = 2,
                                 overflow = TextOverflow.Ellipsis,
                             )

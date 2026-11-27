@@ -34,7 +34,7 @@ fun StatusLine(
             StatusTone.Warn -> "!"
             StatusTone.Error -> "×"
         }
-    val textColor = if (status.tone == StatusTone.Error) colors.content else colors.contentSecondary
+    val textColor = colors.content
     Row(
         modifier =
             modifier

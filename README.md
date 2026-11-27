@@ -25,9 +25,10 @@ Reuse and attribution rules live in `AGENTS.md`; the protocol surface is documen
 
 ## Status
 
-M0 implementation: dashboard setup, encrypted connection profile, recent sessions and source/profile
-selection, read-only paged transcripts, and a placeholder deck. Socket status and desktop-only
-approval/clarification notices are visible. Sending, streaming rendering, voice and live deck data
+M0.1 implementation: dashboard setup, encrypted connection profile, a full-page Menu (Chat, History,
+Bots, disabled Cron, Settings), recent sessions and source/profile selection, read-only paged
+transcripts, and a placeholder deck. Socket status and desktop-only approval/clarification notices
+are visible. Sending, streaming rendering, voice and live deck data
 are **not implemented in M0**.
 
 ## Local build
@@ -66,7 +67,7 @@ developer inbox HMAC protocol, with TLS verification enabled:
 ```
 
 No upload, emulator install or hardware acceptance is implied by a local build. The parent/owner
-must verify the five screens and wheel/back behavior on the LP3-shaped emulator, then first connect
+must verify the pages and wheel/back behavior on the LP3-shaped emulator, then first connect
 on the real phone. Acceptance and remaining checks live in
 `openspec/changes/add-hermes-light-foundation/{tasks,evidence}.md`.
 
@@ -80,10 +81,14 @@ HTTP is for trusted development networks: credentials and transcripts are otherw
 Profiles and per-session read positions are AES-GCM encrypted with an Android Keystore key; app
 data backup must not be used to transfer that key to another device.
 
-Turn the wheel to focus/scroll, click to open or expand, back to return one level. Back at Home
-stays there; long-back opens Setup. Home's thread top leads into the deck, then Sessions. Tool and
-reasoning rows expand; timestamps are available on demand. Approval and clarification notices are
-read-only: respond on the desktop. No turn or approval-response RPC exists in this M0 client.
+Turn the wheel to focus/scroll, click to open or expand, back to return one level. Home's Menu action
+opens the full destination page directly; wheeling past the deck top does the same. Chat returns to
+Home's current session and read position. Back follows Thread → Sessions → Menu → Home; long-back
+opens Setup. Setup starts with an editable loopback address, saved only after connection succeeds.
+Tool rows show names (call ids only as a fallback) and outcomes; tool/reasoning rows expand and
+timestamps are available on demand. Secondary text uses the next SDK tone (`content`).
+Approval and clarification notices are read-only: respond on the desktop. No turn or
+approval-response RPC exists in this M0 client.
 
 Chrome uses SDK widgets only. The annotated transcript-span renderer uses foundation `BasicText`
 because the active SDK's `LightText` accepts only `String`; its typography and colors still come

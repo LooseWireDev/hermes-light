@@ -73,7 +73,6 @@ fun SectionLabel(
     LightText(
         text = text.uppercase(),
         variant = LightTextVariant.Superfine,
-        lighten = true,
         maxLines = 1,
         modifier =
             modifier.padding(
@@ -94,7 +93,6 @@ fun HintLine(
     LightText(
         text = text,
         variant = LightTextVariant.Superfine,
-        lighten = true,
         modifier =
             modifier.padding(
                 start = FOCUS_INSET_UNITS.gridUnitsAsDp(),

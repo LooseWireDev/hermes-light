@@ -212,7 +212,7 @@ fun SetupScreen(
                                 LightTextField(
                                     label = "Server",
                                     value = state.endpoint,
-                                    placeholder = "http://127.0.0.1:9121",
+                                    placeholder = DEFAULT_ENDPOINT,
                                     onClick = { editing = SetupEditor.Endpoint },
                                 )
                             }
@@ -294,7 +294,6 @@ fun SetupScreen(
                                 LightText(
                                     text = "GET api/status",
                                     variant = LightTextVariant.Superfine,
-                                    lighten = true,
                                 )
                             }
                         }
@@ -348,7 +347,6 @@ private fun ModeRow(
         LightText(
             text = if (selected) "● $detail" else "○ $detail",
             variant = LightTextVariant.Superfine,
-            lighten = true,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )

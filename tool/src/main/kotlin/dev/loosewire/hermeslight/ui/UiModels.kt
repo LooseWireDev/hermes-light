@@ -55,7 +55,7 @@ data class HomeActions(
     val onOpenDeckTile: (String) -> Unit = {},
     /** Opens the full Thread at a message id, or at the newest message when null. */
     val onOpenThread: (String?) -> Unit = {},
-    val onOpenSessions: () -> Unit = {},
+    val onOpenMenu: () -> Unit = {},
     /** Home and the full Thread share the same read position and older paging. */
     val threadActions: ThreadActions = ThreadActions(),
     val onBack: () -> Unit = {},
@@ -119,7 +119,7 @@ data class ThreadMessageUi(
     /** Already formatted local time. Revealed on demand by the thread. */
     val timestamp: String? = null,
     val toolName: String? = null,
-    /** "ok", "running", "error"; rendered on the collapsed tool line. */
+    /** "ok", "fail", or "unknown"; a tool result never implies the entire turn is done. */
     val toolOutcome: String? = null,
     val title: String? = null,
     val origin: String? = null,
@@ -222,7 +222,7 @@ data class ProviderUi(
 )
 
 data class SetupUi(
-    val endpoint: String = "",
+    val endpoint: String = DEFAULT_ENDPOINT,
     val mode: AuthModeUi = AuthModeUi.Token,
     val token: String = "",
     val username: String = "",

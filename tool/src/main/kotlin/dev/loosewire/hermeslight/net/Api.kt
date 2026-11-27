@@ -321,6 +321,12 @@ class Api(
             message.display_reasoning?.takeIf { it is JsonPrimitive && it.isString }
                 ?: message.reasoning
                 ?: message.reasoning_text
+        val tool =
+            if (message.role == "tool" || message.type == "tool") {
+                toolMetadata(message.content, message.tool_name?.takeIf { it.isNotBlank() } ?: message.name)
+            } else {
+                null
+            }
         return TranscriptMessage(
             rowId = rowId,
             role = message.role.orEmpty(),
@@ -330,6 +336,9 @@ class Api(
             toolCallId = message.tool_call_id,
             timestampEpochMs = message.timestamp.asEpochMillisOrNull(),
             displayKind = message.display_kind,
+            toolName = tool?.name,
+            toolOutcome = tool?.outcome,
+            toolCalls = toolCallNames(message.tool_calls),
         )
     }
 
@@ -473,4 +482,7 @@ private data class MessageWire(
     val display_reasoning: JsonElement? = null,
     val tool_call_id: String? = null,
     val display_kind: String? = null,
+    val name: String? = null,
+    val tool_name: String? = null,
+    val tool_calls: JsonElement? = null,
 )

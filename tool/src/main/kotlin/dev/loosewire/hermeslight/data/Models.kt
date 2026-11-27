@@ -100,6 +100,10 @@ data class TranscriptMessage(
     val toolCallId: String?,
     val timestampEpochMs: Long?,
     val displayKind: String?,
+    val toolName: String? = null,
+    val toolOutcome: String? = null,
+    /** Assistant call ids to names; retained across paging so result rows can resolve their tool. */
+    val toolCalls: Map<String, String> = emptyMap(),
 )
 
 /** One chronological page of `GET api/sessions/{id}/messages`. */

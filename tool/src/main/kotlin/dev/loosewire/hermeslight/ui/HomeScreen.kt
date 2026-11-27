@@ -16,9 +16,11 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
+import com.thelightphone.sdk.ui.LightBarButton
 import com.thelightphone.sdk.ui.LightText
 import com.thelightphone.sdk.ui.LightTextVariant
 import com.thelightphone.sdk.ui.LightThemeTokens
+import com.thelightphone.sdk.ui.LightTopBar
 import com.thelightphone.sdk.ui.gridUnitsAsDp
 import com.thelightphone.sdk.ui.verticalGridUnitsAsDp
 import dev.loosewire.hermeslight.ui.common.FocusRow
@@ -35,10 +37,10 @@ private enum class HomeZone {
 }
 
 /**
- * Home: deck on top, transcript below, one status line. No top bar.
+ * Home: Menu action, deck on top, transcript below, one status line.
  *
  * Wheel contract here: the thread's top crosses into the deck's bottom; the deck's top opens
- * Sessions. With no messages, the deck is the initial zone, so one wheel-up reaches Sessions.
+ * Menu. With no messages, the deck is the initial zone, so one wheel-up reaches Menu.
  * The thread's position and older/newer callbacks are shared with the full Thread screen.
  */
 @Composable
@@ -88,7 +90,7 @@ fun HomeScreen(
                     if (deckIndex > 0) {
                         deckIndex--
                     } else {
-                        actions.onOpenSessions()
+                        actions.onOpenMenu()
                     }
                 }
             }
@@ -131,13 +133,13 @@ fun HomeScreen(
                     .fillMaxSize()
                     .background(colors.background),
         ) {
+            LightTopBar(leftButton = LightBarButton.Text("MENU", onClick = actions.onOpenMenu))
             SectionLabel("Deck")
             if (state.deck.tiles.isEmpty()) {
                 FocusRow(focused = zone == HomeZone.Deck) {
                     LightText(
                         text = state.deck.emptyText,
                         variant = LightTextVariant.Paragraph,
-                        lighten = true,
                         modifier = Modifier.fillMaxWidth(),
                     )
                 }
@@ -152,7 +154,6 @@ fun HomeScreen(
                         LightText(
                             text = tile.label.uppercase(),
                             variant = LightTextVariant.Superfine,
-                            lighten = true,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                         )
@@ -166,7 +167,6 @@ fun HomeScreen(
                             LightText(
                                 text = detail,
                                 variant = LightTextVariant.Superfine,
-                                lighten = true,
                                 maxLines = 2,
                                 overflow = TextOverflow.Ellipsis,
                             )

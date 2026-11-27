@@ -162,7 +162,6 @@ fun SessionsScreen(
                 LightText(
                     text = if (state.newSessionEnabled) "ready" else "sending arrives in M1",
                     variant = LightTextVariant.Superfine,
-                    lighten = true,
                 )
             }
 
@@ -203,7 +202,6 @@ fun SessionsScreen(
                         LightText(
                             text = detail,
                             variant = LightTextVariant.Superfine,
-                            lighten = true,
                             maxLines = 2,
                             overflow = TextOverflow.Ellipsis,
                         )
@@ -222,7 +220,6 @@ fun SessionsScreen(
                         LightText(
                             text = "profiles and session counts",
                             variant = LightTextVariant.Superfine,
-                            lighten = true,
                         )
                     }
                 }

@@ -38,6 +38,7 @@ import dev.loosewire.hermeslight.ui.ThreadMessageUi
 import dev.loosewire.hermeslight.ui.ThreadNoticeKind
 import dev.loosewire.hermeslight.ui.ThreadNoticeUi
 import dev.loosewire.hermeslight.ui.ThreadPosition
+import dev.loosewire.hermeslight.ui.toolSummary
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.filter
@@ -379,7 +380,6 @@ fun ThreadNotices(
                 LightText(
                     text = line,
                     variant = LightTextVariant.Superfine,
-                    lighten = true,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
@@ -389,7 +389,6 @@ fun ThreadNotices(
             LightText(
                 text = "+$hidden more awaiting desktop",
                 variant = LightTextVariant.Superfine,
-                lighten = true,
                 maxLines = 1,
                 modifier =
                     Modifier.padding(
@@ -417,7 +416,6 @@ fun ThreadView(
             LightText(
                 text = emptyText,
                 variant = LightTextVariant.Paragraph,
-                lighten = true,
                 modifier =
                     Modifier
                         .align(Alignment.Center)
@@ -481,16 +479,11 @@ private fun ThreadMessageRow(
     ) {
         when (message.kind) {
             ThreadMessageKind.Tool -> {
-                val summary =
-                    buildString {
-                        append("· tool")
-                        message.toolName?.takeIf { it.isNotBlank() }?.let { append(": ").append(it) }
-                        message.toolOutcome?.takeIf { it.isNotBlank() }?.let { append(" — ").append(it) }
-                    }
+                val summary = message.toolSummary()
                 LightText(
                     text = summary,
                     variant = LightTextVariant.Detail,
-                    color = if (focused) colors.content else colors.contentSecondary,
+                    color = colors.content,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
                 )
@@ -504,7 +497,7 @@ private fun ThreadMessageRow(
                 LightText(
                     text = "· reasoning",
                     variant = LightTextVariant.Detail,
-                    color = if (focused) colors.content else colors.contentSecondary,
+                    color = colors.content,
                 )
                 if (expanded) {
                     ExpandedText(message)
@@ -526,7 +519,6 @@ private fun ThreadMessageRow(
                 LightText(
                     text = "awaiting desktop · no action on this phone",
                     variant = LightTextVariant.Superfine,
-                    lighten = true,
                 )
             }
 
@@ -547,7 +539,6 @@ private fun ThreadMessageRow(
                 LightText(
                     text = "· ${message.body}",
                     variant = LightTextVariant.Detail,
-                    lighten = true,
                 )
             }
 
@@ -558,7 +549,6 @@ private fun ThreadMessageRow(
                 LightText(
                     text = label,
                     variant = LightTextVariant.Superfine,
-                    lighten = true,
                 )
                 if (message.body.isNotBlank()) {
                     MarkdownText(text = message.body)
@@ -571,7 +561,6 @@ private fun ThreadMessageRow(
             LightText(
                 text = media,
                 variant = LightTextVariant.Detail,
-                lighten = true,
                 modifier = Modifier.fillMaxWidth(),
             )
         }
@@ -580,7 +569,6 @@ private fun ThreadMessageRow(
             LightText(
                 text = message.timestamp,
                 variant = LightTextVariant.Superfine,
-                lighten = true,
             )
         }
     }
@@ -594,7 +582,6 @@ private fun ExpandedText(message: ThreadMessageUi) {
         text = text,
         variant = LightTextVariant.Detail,
         monospace = true,
-        lighten = true,
         modifier = Modifier.fillMaxWidth(),
     )
 }
@@ -605,6 +592,5 @@ private fun ExpandedTimestamp(message: ThreadMessageUi) {
     LightText(
         text = timestamp,
         variant = LightTextVariant.Superfine,
-        lighten = true,
     )
 }

@@ -23,8 +23,8 @@ as the primary way to reach other screens.
 
 Wheel contract (identical everywhere):
 - **Turn** moves a focus list one row (`WheelScroll`); at the thread's end, turning further reaches
-  the deck; at the deck's top, turning further opens the Sessions overlay.
-- **Click** opens the focused row (session → thread; bot → thread of that bot; deck tile → target).
+  the deck; at the deck's top, turning further opens the full Menu page.
+- **Click** opens the focused row (session → thread; bot → filtered sessions; deck tile → target).
 - **Hold** = reserved in M0; push-to-talk (`WheelTalk`), release-to-send and turn-to-cancel start in M1.
 - **Back** = one level up; back at Home = nothing (stay, per LightOS convention).
 
@@ -34,7 +34,7 @@ Wheel contract (identical everywhere):
 | --- | --- | --- | --- |
 | 1 | Setup | Server URL field, "Sign in" (password form) or "Use token", connection test row, honest error line | `GET api/status`, `api/auth/providers`, `POST /auth/password-login`, loopback SPA token |
 | 2 | Home | Top bar with **Menu** action; deck placeholder (M0), June thread below; status line | same as Thread |
-| 2b | Menu | Full-page destination list: Chat / History / Bots / Cron (disabled, "M2") / Settings; Back to Home | none |
+| 2b | Menu | Full-page destination list: Chat / History / Bots / Cron (disabled, "arrives with live tiles") / Settings; Back to Home | none |
 | 3 | Sessions | List of sessions: title / source / age / live dot; footer row "Bots"; top row "New session" (M1 sends) | `GET api/sessions?limit=50&order=recent&exclude_sources=cron` |
 | 4 | Thread | Transcript, wheel-scrolled, bottom-anchored; reasoning/tool one-liners; streaming caret (M1) | `GET api/sessions/{id}/messages?order=latest&limit=50&include_compacted=true`, `.../messages/around` |
 | 5 | Bots | Rows: name + source tag; maps to session selection | `GET api/sessions?source=` + bot ids from config (M0: derived from sessions) |
@@ -58,9 +58,10 @@ Wheel contract (identical everywhere):
 
 ## Light SDK usage
 
-- Widgets: `LightText` variants for all type, `LightTopBar` only where a title is needed (Home has
-  none — the deck is the top), `LightBarButton` for row actions, `SimpleLightScreen` for full screens.
-- Tokens: `LightThemeTokens` spacing/colors; AMOLED black background, white text, gray secondary.
+- Widgets: `LightText` variants for all type, `LightTopBar` for page titles and Home's **Menu**
+  action, `LightBarButton` for bar actions, `SimpleLightScreen` for full screens.
+- Tokens: `LightThemeTokens` spacing/colors; AMOLED black background. Secondary text is lifted from
+  `contentSecondary` to `content`; disabled titles and dividers retain the secondary tone.
 - Input: `com.gios.light.common.hw.WheelScroll` (from BrightHermes, owner's code) wrapped for our
   lists; `WheelTalk` verbatim for M1.
 - No Material3 components for chrome. If a component is missing (e.g. a progress line), draw it with
@@ -70,7 +71,7 @@ Wheel contract (identical everywhere):
 
 - Message rows: role glyph (you / June), body text with minimal markdown (bold, inline code, code
   blocks, links as underlined text), timestamp on demand.
-- Tool calls and reasoning collapse to a single `· tool: name — ok` row (tap expands to raw text).
+- Tool calls and reasoning collapse to a single `· name — ok` or `· name — fail` row (tap expands to raw text); the call id is only a fallback when no name is available.
 - Streaming: M0 renders what the REST transcript holds; M1 adds `message.delta` frames with a caret.
 - Long transcripts: bottom-anchored list; wheel-up loads `messages/around` in 50-message windows;
   position preserved across session switches (stored per session id).

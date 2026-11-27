@@ -55,6 +55,7 @@ internal fun ageLabel(
 private val timeFormat = DateTimeFormatter.ofPattern("MMM d HH:mm")
 
 internal fun AppState.threadUi(): ThreadUi {
+    val toolNames = buildMap { messages.forEach { putAll(it.toolCalls) } }
     val rows =
         messages.flatMap { message ->
             val id = message.rowId.toString()
@@ -76,7 +77,8 @@ internal fun AppState.threadUi(): ThreadUi {
                         },
                     body = message.text,
                     timestamp = timestamp,
-                    toolName = message.toolCallId,
+                    toolName = message.toolName ?: toolNames[message.toolCallId] ?: message.toolCallId,
+                    toolOutcome = message.toolOutcome,
                     expandableText = message.text,
                 )
             if (message.reasoning.isNullOrBlank()) {

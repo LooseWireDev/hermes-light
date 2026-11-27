@@ -200,14 +200,14 @@ fun MarkdownText(
     val codeStyle =
         SpanStyle(
             fontFamily = FontFamily.Monospace,
-            color = colors.contentSecondary,
+            color = colors.content,
         )
     val linkStyle =
         SpanStyle(
             color = colors.content,
             textDecoration = TextDecoration.Underline,
         )
-    val mediaStyle = SpanStyle(color = colors.contentSecondary)
+    val mediaStyle = SpanStyle(color = colors.content)
 
     Column(modifier = modifier.fillMaxWidth()) {
         blocks.forEachIndexed { index, block ->
@@ -243,7 +243,6 @@ fun MarkdownText(
                             text = block.text,
                             variant = LightTextVariant.Detail,
                             monospace = true,
-                            lighten = true,
                             modifier = Modifier.fillMaxWidth(),
                         )
                     }
@@ -253,7 +252,6 @@ fun MarkdownText(
                     LightText(
                         text = block.label,
                         variant = LightTextVariant.Detail,
-                        lighten = true,
                         modifier = Modifier.fillMaxWidth(),
                     )
                 }

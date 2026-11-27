@@ -27,6 +27,7 @@ import dev.loosewire.hermeslight.ui.HomeActions
 import dev.loosewire.hermeslight.ui.HomeScreen
 import dev.loosewire.hermeslight.ui.HomeUi
 import dev.loosewire.hermeslight.ui.ListPosition
+import dev.loosewire.hermeslight.ui.MenuScreen
 import dev.loosewire.hermeslight.ui.ProviderUi
 import dev.loosewire.hermeslight.ui.SessionsActions
 import dev.loosewire.hermeslight.ui.SessionsScreen
@@ -67,14 +68,6 @@ class MainActivity(
     override fun Content() = Surface(controller, Route.Home, position)
 }
 
-private enum class Route {
-    Home,
-    Sessions,
-    Thread,
-    Bots,
-    Setup,
-}
-
 /** Kept by the SDK screen instance while a child covers its composition. */
 private class PositionCapture(
     var list: ListPosition? = null,
@@ -100,10 +93,17 @@ private class DestinationScreen(
 
 private fun SimpleLightScreen<Unit>.open(
     controller: AppController,
+    from: Route,
     route: Route,
 ) {
-    if (route == Route.Bots) controller.loadBots()
-    navigateTo({ DestinationScreen(it, controller, route) })
+    route.openFrom(
+        from = from,
+        back = { goBack() },
+        forward = { destination ->
+            if (destination == Route.Bots) controller.loadBots()
+            navigateTo({ DestinationScreen(it, controller, destination) })
+        },
+    )
 }
 
 @Composable
@@ -114,7 +114,7 @@ private fun SimpleLightScreen<Unit>.Surface(
 ) {
     val state by controller.state.collectAsState()
     val back: () -> Unit = { if (route != Route.Home) goBack() }
-    val setup: () -> Unit = { if (route != Route.Setup) open(controller, Route.Setup) }
+    val setup: () -> Unit = { if (route != Route.Setup) open(controller, route, Route.Setup) }
     val threadActions =
         ThreadActions(
             onLoadOlder = controller::loadOlder,
@@ -136,16 +136,22 @@ private fun SimpleLightScreen<Unit>.Surface(
                     HomeActions(
                         onOpenThread = {
                             if (state.selectedSession == null) {
-                                open(controller, Route.Sessions)
+                                open(controller, route, Route.Sessions)
                             } else {
-                                open(controller, Route.Thread)
+                                open(controller, route, Route.Thread)
                             }
                         },
-                        onOpenSessions = { open(controller, Route.Sessions) },
+                        onOpenMenu = { open(controller, route, Route.Menu) },
                         onBack = back,
                         onLongBack = setup,
                         threadActions = threadActions,
                     ),
+                )
+            route == Route.Menu ->
+                MenuScreen(
+                    status = state.statusUi(),
+                    onOpen = { open(controller, route, it) },
+                    onBack = back,
                 )
             route == Route.Sessions ->
                 SessionsScreen(
@@ -162,9 +168,9 @@ private fun SimpleLightScreen<Unit>.Surface(
                     SessionsActions(
                         onOpenSession = {
                             controller.openSession(it)
-                            open(controller, Route.Thread)
+                            open(controller, route, Route.Thread)
                         },
-                        onOpenBots = { open(controller, Route.Bots) },
+                        onOpenBots = { open(controller, route, Route.Bots) },
                         onLoadMore = { controller.loadSessions(reset = state.sessions.isEmpty()) },
                         onPositionChanged = { position.list = it },
                         onBack = back,
@@ -189,7 +195,7 @@ private fun SimpleLightScreen<Unit>.Surface(
                     BotsActions(
                         onOpenBot = {
                             controller.selectBot(it.takeIf(String::isNotEmpty))
-                            open(controller, Route.Thread)
+                            open(controller, route, Route.Sessions)
                         },
                         onLoadBots = controller::loadBots,
                         onPositionChanged = { position.list = it },
