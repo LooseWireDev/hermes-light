@@ -155,3 +155,14 @@ thread; empty Home starts at History and skips absent content. The SDK bar/strip
 with `›`; no extra chrome, page or hold gesture. Reverse traversal returns to the newest thread,
 but up at its oldest boundary never crosses focus. A final ktlint nested-conditional issue was
 fixed before the successful four-gate run above. LP3 visual acceptance is still unperformed.
+
+## 2026-11-27 — M0.3 device acceptance (menu removed, conditional strip)
+
+Signed 0.1.2 (code 102) release build on the LP3 AVD.
+
+- Home top bar: `› History` and `Bots` actions; no MENU action, no menu page in the build.
+- DECK header and placeholder removed — with nothing pending the thread starts at the top of the
+  content area (strip renders zero height).
+- Thread renders real messages with `· terminal — ok` tool one-liners.
+- Status-strip appearance with live work (running turn / pending approval) remains unverified on
+  device: the read-only socket does not surface those events in M0 — M1 wires the strip to live state.
