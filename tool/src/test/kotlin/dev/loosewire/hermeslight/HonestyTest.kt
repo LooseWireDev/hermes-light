@@ -28,7 +28,7 @@ class HonestyTest {
     }
 
     @Test
-    fun `pending approval is read only names origin deduplicates and resolves from desktop`() {
+    fun `pending approval survives display acknowledgement until confirmed resolution`() {
         val event =
             GatewayEvent.ApprovalRequested(
                 requestId = "request",
@@ -47,10 +47,12 @@ class HonestyTest {
         val repeated = reduceGatewayEvent(once, event)
         val twice = reduceGatewayEvent(repeated, GatewayEvent.ApprovalPending("a"))
         val notice = twice.desktopNotices.getValue("a").single()
-        assertEquals("approval pending — respond on desktop", notice.title)
+        assertEquals("approval pending", notice.title)
         assertEquals("a", notice.origin)
         assertEquals("rm report", notice.detail)
-        val resolved = reduceGatewayEvent(twice, GatewayEvent.ApprovalReceived("request", "a"))
+        val acknowledged = reduceGatewayEvent(twice, GatewayEvent.ApprovalReceived("request", "a"))
+        assertEquals(twice.desktopNotices, acknowledged.desktopNotices)
+        val resolved = acknowledged.settleApproval("a", "request")
         assertTrue(resolved.desktopNotices.getValue("a").isEmpty())
     }
 

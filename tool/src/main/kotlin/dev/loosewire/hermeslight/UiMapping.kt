@@ -138,8 +138,14 @@ internal fun AppState.threadUi(): ThreadUi {
                 )
             }
         }
+    val conversation = conversations[selectedSession] ?: Conversation(running = selectedSession in liveSessions)
     val notices =
-        (desktopNotices[GLOBAL_NOTICE].orEmpty() + desktopNotices[selectedSession].orEmpty()).map { notice ->
+        (
+            desktopNotices[GLOBAL_NOTICE].orEmpty() +
+                desktopNotices[selectedSession].orEmpty().filter { notice ->
+                    if (notice.clarification) conversation.clarifications.isEmpty() else conversation.approvals.isEmpty()
+                }
+        ).map { notice ->
             ThreadNoticeUi(
                 notice.id,
                 if (notice.clarification) ThreadNoticeKind.Clarify else ThreadNoticeKind.Approval,
@@ -152,7 +158,7 @@ internal fun AppState.threadUi(): ThreadUi {
         sessionId = selectedSession,
         title = sessions.firstOrNull { it.id == selectedSession }?.title ?: "Thread",
         botName = bots.firstOrNull { it.id == selectedBot }?.name ?: "June",
-        messages = rows,
+        messages = if (selectedSession == null) rows else rows + conversation.liveRows(),
         notices = notices,
         position = positionRow?.let { ThreadPosition(it.toString(), positionOffset) },
         hasOlder = threadHasOlder,
@@ -162,5 +168,7 @@ internal fun AppState.threadUi(): ThreadUi {
         error = operationError,
         emptyText = if (selectedSession == null) "Use History to choose a session." else "No messages yet.",
         status = statusUi(),
+        composer = conversation.composer,
+        running = conversation.running,
     )
 }

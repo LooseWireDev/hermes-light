@@ -6,14 +6,17 @@ import dev.loosewire.hermeslight.data.ProfileStore
 import dev.loosewire.hermeslight.data.SessionSummary
 import dev.loosewire.hermeslight.data.TranscriptMessage
 import dev.loosewire.hermeslight.net.Api
+import dev.loosewire.hermeslight.net.ApiException
 import dev.loosewire.hermeslight.net.Auth
 import dev.loosewire.hermeslight.net.AuthProvider
 import dev.loosewire.hermeslight.net.Endpoint
 import dev.loosewire.hermeslight.net.Gateway
 import dev.loosewire.hermeslight.net.GatewayConnection
 import dev.loosewire.hermeslight.net.GatewayEvent
+import dev.loosewire.hermeslight.net.GatewayRpcException
 import dev.loosewire.hermeslight.net.GatewayState
 import dev.loosewire.hermeslight.net.ProbeResult
+import dev.loosewire.hermeslight.net.RpcFailureKind
 import dev.loosewire.hermeslight.net.SignInResult
 import dev.loosewire.hermeslight.net.TicketResult
 import dev.loosewire.hermeslight.net.WsAuthParam
@@ -36,6 +39,11 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 
 internal data class BotSource(
     val id: String,
@@ -71,6 +79,8 @@ internal data class AppState(
     val positionOffset: Int = 0,
     val liveSessions: Set<String> = emptySet(),
     val desktopNotices: Map<String, List<DesktopNotice>> = emptyMap(),
+    val conversations: Map<String, Conversation> = emptyMap(),
+    val sessionsRequired: Boolean = false,
 )
 
 /** One foreground connection owner shared by the SDK screen stack. No network work in Compose. */
@@ -92,6 +102,10 @@ internal class AppController(
     private var sessionsOffset = 0
     private var connectionEpoch = 0
     private val client = defaultHttpClient()
+    private var nextPromptId = 0L
+    private val eventRevisions = mutableMapOf<String, Long>()
+    private val refreshJobs = mutableMapOf<String, Job>()
+    private var attentionJob: Job? = null
     private val api = Api(client, tokenProvider = { profile?.takeIf { it.authMode == AuthMode.TOKEN }?.token })
     private val auth = Auth(client)
     private val saveMutex = Mutex()
@@ -103,7 +117,14 @@ internal class AppController(
                 override fun onState(state: GatewayState) {
                     mutable.update { it.copy(status = connectionLabel(state)) }
                     when (state) {
-                        GatewayState.Connected -> handshake?.complete(Unit)
+                        GatewayState.Connected -> {
+                            if (handshake != null) {
+                                handshake?.complete(Unit)
+                            } else {
+                                mutable.value.selectedSession?.let(::refreshLatest)
+                                refreshAttention()
+                            }
+                        }
                         is GatewayState.AuthFailed -> handshake?.completeExceptionally(IllegalStateException(state.message))
                         else -> Unit
                     }
@@ -166,6 +187,9 @@ internal class AppController(
         sessionsJob?.cancel()
         threadJob?.cancel()
         botsJob?.cancel()
+        refreshJobs.values.forEach { it.cancel() }
+        refreshJobs.clear()
+        attentionJob?.cancel()
         gateway.onForeground(false)
         mutable.update { it.copy(connecting = false, sessionsLoading = false, threadLoading = false, botsLoading = false) }
     }
@@ -294,10 +318,13 @@ internal class AppController(
                         messages = if (persist) emptyList() else it.messages,
                         desktopNotices = if (persist) emptyMap() else it.desktopNotices,
                         liveSessions = if (persist) emptySet() else it.liveSessions,
+                        conversations = if (persist) emptyMap() else it.conversations,
+                        sessionsRequired = false,
                     )
                 }
                 loadSessions(reset = true)
-                authenticated.selectedSessionId?.let { openSession(it) }
+                refreshAttention()
+                authenticated.selectedSessionId?.let { openSession(it, remembered = true) }
             }
         } catch (error: CancellationException) {
             if (error is kotlinx.coroutines.TimeoutCancellationException) {
@@ -350,7 +377,7 @@ internal class AppController(
                             sessionsHaveMore = page.hasMore,
                         )
                     }
-                    if (mutable.value.selectedSession == null) {
+                    if (mutable.value.selectedSession == null && !mutable.value.sessionsRequired) {
                         page.sessions.firstOrNull()?.let { openSession(it.id) }
                     }
                 } catch (error: CancellationException) {
@@ -363,7 +390,10 @@ internal class AppController(
             }
     }
 
-    fun openSession(id: String) {
+    fun openSession(
+        id: String,
+        remembered: Boolean = false,
+    ) {
         val saved = profile ?: return
         threadJob?.cancel()
         val row = saved.readPositions[id]
@@ -372,6 +402,7 @@ internal class AppController(
                 selectedSession = id,
                 messages = if (it.selectedSession == id) it.messages else emptyList(),
                 positionRow = row,
+                sessionsRequired = false,
                 positionOffset = saved.readOffsets[id] ?: 0,
                 threadLoading = true,
                 operationError = null,
@@ -395,10 +426,22 @@ internal class AppController(
                         val page = api.messages(endpoint, id, profile = selectedProfile(saved))
                         mutable.update { it.copy(messages = page.messages, threadHasOlder = page.hasOlder, threadHasNewer = false) }
                     }
+                    if (remembered && mutable.value.conversations[id]?.stream != null) refreshLatest(id)
                 } catch (error: CancellationException) {
                     throw error
                 } catch (error: Exception) {
-                    operationFailure(error)
+                    if (remembered && error is ApiException && error.httpCode == 404) {
+                        mutable.update { it.clearMissingSession(id) }
+                        persist {
+                            it.copy(
+                                selectedSessionId = null,
+                                readPositions = it.readPositions - id,
+                                readOffsets = it.readOffsets - id,
+                            )
+                        }
+                    } else {
+                        operationFailure(error)
+                    }
                 } finally {
                     if (currentCoroutineContext().isActive) mutable.update { it.copy(threadLoading = false) }
                 }
@@ -557,15 +600,401 @@ internal class AppController(
         mutable.update { it.copy(operationError = error.message ?: "Dashboard request failed") }
     }
 
+    fun sessionsShown() {
+        mutable.update { it.copy(sessionsRequired = false) }
+    }
+
+    fun editDraft(
+        session: String,
+        text: String,
+    ) {
+        updateConversation(session) { it.copy(composer = text) }
+    }
+
+    private fun updateConversation(
+        session: String,
+        transform: (Conversation) -> Conversation,
+    ) {
+        mutable.update {
+            it.copy(conversations = it.conversations + (session to transform(it.conversations[session] ?: Conversation())))
+        }
+    }
+
+    fun submit(
+        session: String,
+        text: String,
+    ) {
+        if (text.isBlank()) return
+        val saved = profile ?: return
+        val epoch = connectionEpoch
+        val needsBaseline = mutable.value.threadHasNewer
+        val id = "phone-${++nextPromptId}"
+        val baseline =
+            if (needsBaseline) {
+                Int.MAX_VALUE
+            } else {
+                mutable.value.messages
+                    .lastOrNull()
+                    ?.rowId ?: 0
+            }
+        updateConversation(session) { current ->
+            val running = session in mutable.value.liveSessions || current.running
+            val submitted = current.copy(running = running).submit(id, text, baseline)
+            val next =
+                if (needsBaseline) {
+                    submitted.copy(prompts = submitted.prompts.map { if (it.id == id) it.copy(status = PromptStatus.PREPARING) else it })
+                } else {
+                    submitted
+                }
+            if (current.composer.isNotBlank() && current.composer.trim() != text.trim()) {
+                next.copy(composer = current.composer)
+            } else {
+                next
+            }
+        }
+        scope.launch {
+            try {
+                if (needsBaseline) {
+                    val page = api.messages(Endpoint.parse(saved.endpoint), session, profile = selectedProfile(saved))
+                    if (epoch != connectionEpoch) error("Connection changed before the prompt was sent")
+                    updateConversation(session) { current ->
+                        val queued = current.running || session in mutable.value.liveSessions
+                        current.copy(
+                            prompts =
+                                current.prompts.map {
+                                    if (it.id == id) {
+                                        it.copy(
+                                            baselineRowId = page.messages.lastOrNull()?.rowId ?: 0,
+                                            queued = queued,
+                                            status = if (queued) PromptStatus.QUEUED else PromptStatus.PENDING,
+                                        )
+                                    } else {
+                                        it
+                                    }
+                                },
+                        )
+                    }
+                }
+                val queued =
+                    mutable.value.conversations[session]
+                        ?.prompts
+                        ?.firstOrNull { it.id == id }
+                        ?.queued == true
+                val result =
+                    gateway.request(
+                        "prompt.submit",
+                        buildJsonObject {
+                            put("session_id", session)
+                            put("text", text.trim())
+                            if (queued) put("queued", true)
+                        },
+                    )
+                updateConversation(session) { it.submitResult(id, result) }
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: GatewayRpcException) {
+                updateConversation(session) {
+                    if (error.kind == RpcFailureKind.TIMEOUT || error.kind == RpcFailureKind.CONNECTION_LOST) {
+                        it.submitUnknown(id, error.message)
+                    } else {
+                        it.submitResult(id, null, error.message ?: "Prompt rejected")
+                    }
+                }
+            } catch (error: Exception) {
+                updateConversation(session) { it.submitResult(id, null, error.message ?: "Prompt was not sent") }
+            }
+        }
+    }
+
+    /** Resolve stable request ids against current hoisted state, never a stale list index. */
+    fun activate(
+        session: String,
+        action: String,
+    ) {
+        val conversation = mutable.value.conversations[session] ?: Conversation(running = session in mutable.value.liveSessions)
+        when {
+            action == "send" -> submit(session, conversation.composer)
+            action == "stop" -> stop(session)
+            action.startsWith("retry:") -> {
+                val id = action.removePrefix("retry:")
+                val prompt = conversation.prompts.firstOrNull { it.id == id && it.status == PromptStatus.FAILED } ?: return
+                updateConversation(session) { it.copy(prompts = it.prompts.filterNot { row -> row.id == id }) }
+                submit(session, prompt.text)
+            }
+            action.startsWith("cancel:") -> cancelQueued(session, action.removePrefix("cancel:"))
+            else -> {
+                for (approval in conversation.approvals) {
+                    for (choice in approval.allowedChoices()) {
+                        if (action == "approval:${approval.rowKey()}:$choice") {
+                            respondApproval(session, approval, choice)
+                            return
+                        }
+                    }
+                }
+                for (clarify in conversation.clarifications) {
+                    if (clarify.status != DecisionStatus.PENDING) continue
+                    val key = clarify.rowKey()
+                    if (action == "clarify:$key:send") {
+                        respondClarify(session, clarify)
+                        return
+                    }
+                    for (question in clarify.questions()) {
+                        for ((index, choice) in question.choices.withIndex()) {
+                            if (action != "clarify:$key:${question.id}:$index") continue
+                            val selected = clarify.toggleChoice(question.id, choice)
+                            updateConversation(session) {
+                                it.copy(clarifications = it.clarifications.map { row -> if (row.rowKey() == key) selected else row })
+                            }
+                            if (clarify.questions().size == 1 && !question.multiSelect) respondClarify(session, selected)
+                            return
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private fun stop(session: String) {
+        val current = mutable.value.conversations[session] ?: Conversation(running = session in mutable.value.liveSessions)
+        if (!current.running || current.stopping) return
+        updateConversation(session) { it.copy(running = true).beginStop() }
+        scope.launch {
+            try {
+                gateway.request("session.interrupt", buildJsonObject { put("session_id", session) })
+                updateConversation(session) { it.stopResult() }
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                updateConversation(session) { it.stopResult(error.message ?: "Stop failed") }
+            }
+        }
+    }
+
+    private fun cancelQueued(
+        session: String,
+        id: String,
+    ) {
+        val prompt =
+            mutable.value.conversations[session]
+                ?.prompts
+                ?.firstOrNull { it.id == id } ?: return
+        if (prompt.status != PromptStatus.QUEUED) return
+        val params = prompt.cancelParams(session) ?: return
+        updateConversation(session) { it.cancelQueued(id) }
+        scope.launch {
+            try {
+                val result = gateway.request("prompt.cancel", params) as? JsonObject
+                val status = (result?.get("status") as? JsonPrimitive)?.content?.lowercase()
+                val outcome = (result?.get("outcome") as? JsonPrimitive)?.content?.lowercase()
+                val cancelled = status in CANCELLED_STATUSES || outcome in CANCELLED_STATUSES
+                updateConversation(session) {
+                    it.cancelQueuedResult(id, if (cancelled) null else "Cancellation not confirmed — reconcile with gateway")
+                }
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                updateConversation(session) { it.cancelQueuedResult(id, error.message ?: "Cancellation failed") }
+            }
+        }
+    }
+
+    private fun respondApproval(
+        session: String,
+        approval: ApprovalDecision,
+        choice: String,
+    ) {
+        val params = approval.respondParams(choice, session) ?: return
+        val id = approval.request.requestId
+        updateConversation(session) { it.markApprovalSending(id, choice) }
+        scope.launch {
+            try {
+                val result = gateway.request("approval.respond", params) as? JsonObject
+                val resolved = (result?.get("resolved") as? JsonPrimitive)?.content?.toIntOrNull()
+                val status = (result?.get("status") as? JsonPrimitive)?.content
+                when {
+                    resolved != null && resolved > 0 || status == "resolved" || status == "already_resolved" ->
+                        mutable.update { it.settleApproval(session, id) }
+                    resolved == 0 -> Unit // Confirm absence with the authoritative pending query.
+                    else -> error("Approval response was not accepted")
+                }
+                refreshAttention()
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                updateConversation(session) { it.markApprovalError(id, error.message ?: "Approval response failed") }
+            }
+        }
+    }
+
+    private fun respondClarify(
+        session: String,
+        clarify: ClarifyDecision,
+    ) {
+        if (clarify.questions().any { it.id !in clarify.lockedAnswers && clarify.answerFor(it.id).isNullOrBlank() }) return
+        val calls = clarify.responseCalls(session)
+        if (calls.isEmpty()) return
+        updateConversation(session) { it.markClarifySending(clarify.request.clarifyId) }
+        scope.launch {
+            try {
+                for (call in calls) gateway.request(call.method, call.params)
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                updateConversation(session) { it.markClarifyError(clarify.request.clarifyId, error.message ?: "Answer failed") }
+            }
+        }
+    }
+
+    private fun refreshAttention() {
+        attentionJob?.cancel()
+        val epoch = connectionEpoch
+        attentionJob =
+            scope.launch {
+                try {
+                    val revisions = eventRevisions.toMap()
+                    val snapshot = gateway.request("session.active_list", buildJsonObject {})
+                    val entries =
+                        (snapshot as? JsonObject)?.get("sessions") as? JsonArray
+                            ?: error("Dashboard returned no active-session snapshot")
+                    val active =
+                        entries
+                            .mapNotNull { item ->
+                                val row = item as? JsonObject ?: return@mapNotNull null
+                                val id = (row["session_key"] as? JsonPrimitive)?.content ?: return@mapNotNull null
+                                val status = (row["status"] as? JsonPrimitive)?.content
+                                id.takeIf { status in LIVE_STATUSES }
+                            }.toSet()
+                    if (epoch != connectionEpoch) return@launch
+                    mutable.update { current ->
+                        val changed = eventRevisions.keys.filter { eventRevisions[it] != revisions[it] }.toSet()
+                        current.copy(
+                            liveSessions = (active - changed) + (current.liveSessions intersect changed),
+                            conversations =
+                                current.conversations.mapValues { (id, conversation) ->
+                                    if (id in changed) conversation else conversation.copy(running = id in active)
+                                },
+                        )
+                    }
+                    val sessions =
+                        (
+                            mutable.value.desktopNotices.keys + active +
+                                listOfNotNull(
+                                    mutable.value.selectedSession?.takeIf { id -> mutable.value.sessions.any { it.id == id } },
+                                )
+                        ) - GLOBAL_NOTICE
+                    for (session in sessions) {
+                        val revision = eventRevisions[session] ?: 0L
+                        val result =
+                            gateway.request(
+                                "approval.pending",
+                                buildJsonObject { put("session_id", session) },
+                            )
+                        val approvals =
+                            (result as? JsonObject)?.get("approvals") as? JsonArray
+                                ?: continue
+                        if (epoch != connectionEpoch || revision != (eventRevisions[session] ?: 0L)) continue
+                        val events =
+                            approvals.mapNotNull { approval ->
+                                val payload = approval as? JsonObject ?: return@mapNotNull null
+                                val frame =
+                                    buildJsonObject {
+                                        put("method", "event")
+                                        put(
+                                            "params",
+                                            buildJsonObject {
+                                                put("type", "approval.request")
+                                                put("session_id", session)
+                                                put("payload", payload)
+                                            },
+                                        )
+                                    }
+                                val parsed =
+                                    dev.loosewire.hermeslight.net.GatewayEventParser
+                                        .parse(frame.toString())
+                                (parsed as? dev.loosewire.hermeslight.net.ParsedFrame.Event)?.event as? GatewayEvent.ApprovalRequested
+                            }
+                        mutable.update { current ->
+                            var next = current
+                            val present = events.map { it.requestId ?: "approval:$session" }.toSet()
+                            for (notice in current.desktopNotices[session].orEmpty()) {
+                                if (!notice.clarification && notice.id !in present) {
+                                    next = next.settleApproval(session, notice.id)
+                                }
+                            }
+                            for (event in events) next = reduceGatewayEvent(next, event)
+                            next
+                        }
+                    }
+                } catch (error: CancellationException) {
+                    throw error
+                } catch (error: Exception) {
+                    if (epoch == connectionEpoch) operationFailure(error)
+                }
+            }
+    }
+
+    /** Replace transient rows only with an authoritative snapshot that no newer event outran. */
+    private fun refreshLatest(session: String) {
+        val saved = profile ?: return
+        refreshJobs[session]?.cancel()
+        val revision = eventRevisions[session] ?: 0L
+        val epoch = connectionEpoch
+        refreshJobs[session] =
+            scope.launch {
+                try {
+                    val endpoint = Endpoint.parse(saved.endpoint)
+                    val detail = api.session(endpoint, session, selectedProfile(saved))
+                    val page = api.messages(endpoint, session, profile = selectedProfile(saved))
+                    if (epoch != connectionEpoch || revision != (eventRevisions[session] ?: 0L)) return@launch
+                    val running = detail.status?.lowercase()?.let { it in LIVE_STATUSES }
+                    mutable.update { current ->
+                        val conversation = current.conversations[session] ?: Conversation()
+                        val reconciled =
+                            conversation
+                                .reconcile(page.messages)
+                                .copy(running = running ?: conversation.running)
+                        current.copy(
+                            messages = if (current.selectedSession == session) page.messages else current.messages,
+                            threadHasOlder = if (current.selectedSession == session) page.hasOlder else current.threadHasOlder,
+                            threadHasNewer = if (current.selectedSession == session) false else current.threadHasNewer,
+                            conversations = current.conversations + (session to reconciled),
+                            liveSessions =
+                                when (running) {
+                                    true -> current.liveSessions + session
+                                    false -> current.liveSessions - session
+                                    null -> current.liveSessions
+                                },
+                        )
+                    }
+                } catch (error: CancellationException) {
+                    throw error
+                } catch (error: Exception) {
+                    if (epoch == connectionEpoch && mutable.value.selectedSession == session) operationFailure(error)
+                }
+            }
+    }
+
     private fun receive(event: GatewayEvent) {
+        event.sessionId?.let { eventRevisions[it] = (eventRevisions[it] ?: 0L) + 1 }
         mutable.update { reduceGatewayEvent(it, event) }
-        if ((event is GatewayEvent.Done || event is GatewayEvent.MessageDone) &&
+        if ((event is GatewayEvent.Done || event is GatewayEvent.MessageDone || event is GatewayEvent.Failure) &&
             event.sessionId == mutable.value.selectedSession
         ) {
-            // M0 never renders deltas: refresh authoritative REST only on completion.
-            mutable.value.selectedSession?.let(::openSession)
+            event.sessionId?.let(::refreshLatest)
+        }
+        val waiting =
+            mutable.value.desktopNotices[event.sessionId]
+                .orEmpty()
+                .any { !it.clarification }
+        if (event is GatewayEvent.ApprovalPending || event is GatewayEvent.ApprovalReceived ||
+            waiting && (event is GatewayEvent.Done || event is GatewayEvent.Failure)
+        ) {
+            refreshAttention()
         }
     }
 }
+
+private val LIVE_STATUSES = setOf("starting", "waiting", "working", "streaming", "resuming")
+private val CANCELLED_STATUSES = setOf("cancelled", "canceled")
 
 private fun selectedProfile(profile: Profile): String? = profile.botProfile?.takeIf { it.startsWith("profile:") }?.removePrefix("profile:")

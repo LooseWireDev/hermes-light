@@ -4,6 +4,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -23,6 +24,7 @@ import dev.loosewire.hermeslight.ui.BotRowUi
 import dev.loosewire.hermeslight.ui.BotsActions
 import dev.loosewire.hermeslight.ui.BotsScreen
 import dev.loosewire.hermeslight.ui.BotsUi
+import dev.loosewire.hermeslight.ui.ComposerEditor
 import dev.loosewire.hermeslight.ui.HomeActions
 import dev.loosewire.hermeslight.ui.HomeScreen
 import dev.loosewire.hermeslight.ui.HomeUi
@@ -35,8 +37,12 @@ import dev.loosewire.hermeslight.ui.SetupActions
 import dev.loosewire.hermeslight.ui.SetupScreen
 import dev.loosewire.hermeslight.ui.SetupUi
 import dev.loosewire.hermeslight.ui.ThreadActions
+import dev.loosewire.hermeslight.ui.ThreadMessageKind
+import dev.loosewire.hermeslight.ui.ThreadMessageUi
 import dev.loosewire.hermeslight.ui.ThreadPosition
 import dev.loosewire.hermeslight.ui.ThreadScreen
+import dev.loosewire.hermeslight.voice.hasRecordAudioPermission
+import dev.loosewire.hermeslight.voice.rememberRecordAudioPermissionLauncher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -55,6 +61,7 @@ class MainActivity(
     }
 
     override fun willShow() {
+        position.shownRevision++
         controller.resume()
         controller.refreshReadPosition()
     }
@@ -70,7 +77,9 @@ class MainActivity(
 /** Kept by the SDK screen instance while a child covers its composition. */
 private class PositionCapture(
     var list: ListPosition? = null,
-)
+) {
+    var shownRevision by mutableIntStateOf(0)
+}
 
 private class DestinationScreen(
     activity: SealedLightActivity,
@@ -80,6 +89,7 @@ private class DestinationScreen(
     private val position = PositionCapture()
 
     override fun willShow() {
+        position.shownRevision++
         controller.resume()
         controller.refreshReadPosition()
     }
@@ -114,6 +124,37 @@ private fun SimpleLightScreen<Unit>.Surface(
     val state by controller.state.collectAsState()
     val back: () -> Unit = { if (route != Route.Home) goBack() }
     val setup: () -> Unit = { if (route != Route.Setup) open(controller, route, Route.Setup) }
+    var composing by remember(state.selectedSession, state.profileVersion) { mutableStateOf(false) }
+    val permissionLauncher = rememberRecordAudioPermissionLauncher()
+    var microphoneGranted by remember { mutableStateOf<Boolean?>(null) }
+    LaunchedEffect(position.shownRevision) { microphoneGranted = hasRecordAudioPermission() }
+    val transcript = state.threadUi()
+    val thread =
+        if (state.selectedSession == null) {
+            transcript
+        } else {
+            transcript.copy(
+                messages =
+                    transcript.messages +
+                        ThreadMessageUi(
+                            id = "voice:permission",
+                            kind = ThreadMessageKind.System,
+                            body =
+                                when (microphoneGranted) {
+                                    null -> "Checking microphone permission…"
+                                    false -> "Microphone permission not granted — request, or enable in LightOS Settings"
+                                    true -> "Voice unavailable — recognizer is not supported by this SDK build"
+                                },
+                            action = if (microphoneGranted == false && permissionLauncher != null) "microphone" else null,
+                        ),
+            )
+        }
+    LaunchedEffect(state.sessionsRequired) {
+        if (state.sessionsRequired) {
+            controller.sessionsShown()
+            open(controller, route, Route.Sessions)
+        }
+    }
     val threadActions =
         ThreadActions(
             onLoadOlder = controller::loadOlder,
@@ -124,14 +165,33 @@ private fun SimpleLightScreen<Unit>.Surface(
             },
             onBack = back,
             onLongBack = setup,
+            onDraftChange = { text -> state.selectedSession?.let { controller.editDraft(it, text) } },
+            onSubmit = { text ->
+                state.selectedSession?.let {
+                    controller.editDraft(it, text)
+                    controller.submit(it, text)
+                }
+            },
+            onAction = { action ->
+                if (action == "compose") {
+                    composing = true
+                } else if (action == "microphone") {
+                    permissionLauncher?.launch()
+                } else if (route == Route.Home && (action.startsWith("approval:") || action.startsWith("clarify:"))) {
+                    open(controller, route, Route.Thread)
+                } else {
+                    state.selectedSession?.let { controller.activate(it, action) }
+                }
+            },
         )
     LightTheme(colors = LightThemeColors.Dark) {
         when {
             !state.initialized -> LightText("connecting…", LightTextVariant.Detail)
+            composing -> ComposerEditor(thread, threadActions) { composing = false }
             route == Route.Setup || !state.configured -> SetupForm(state, controller, back)
             route == Route.Home ->
                 HomeScreen(
-                    HomeUi(statusStrip = state.statusStripUi(), thread = state.threadUi()),
+                    HomeUi(statusStrip = state.statusStripUi(), thread = thread),
                     HomeActions(
                         onOpenThread = {
                             if (state.selectedSession == null) {
@@ -175,7 +235,7 @@ private fun SimpleLightScreen<Unit>.Surface(
                         onLongBack = setup,
                     ),
                 )
-            route == Route.Thread -> ThreadScreen(state.threadUi(), threadActions)
+            route == Route.Thread -> ThreadScreen(thread, threadActions)
             route == Route.Bots ->
                 BotsScreen(
                     BotsUi(

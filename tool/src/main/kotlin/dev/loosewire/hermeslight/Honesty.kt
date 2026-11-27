@@ -20,8 +20,22 @@ internal fun connectionLabel(state: GatewayState): String =
         is GatewayState.AuthFailed -> "error: ${state.message}"
     }
 
-/** No optimistic completion, no delta rendering, no approval/clarify response path in M0. */
+/** Session identity comes from the frame, never from whichever screen happens to be open. */
 internal fun reduceGatewayEvent(
+    state: AppState,
+    event: GatewayEvent,
+): AppState {
+    val session = event.sessionId
+    val updated =
+        if (session == null) {
+            state
+        } else {
+            state.copy(conversations = state.conversations + (session to (state.conversations[session] ?: Conversation()).reduce(event)))
+        }
+    return reduceAttention(updated, event)
+}
+
+private fun reduceAttention(
     state: AppState,
     event: GatewayEvent,
 ): AppState {
@@ -70,7 +84,7 @@ internal fun reduceGatewayEvent(
                 DesktopNotice(
                     id = event.requestId ?: "approval:$key",
                     clarification = false,
-                    title = "approval pending — respond on desktop",
+                    title = "approval pending",
                     origin = origin,
                     detail = event.label ?: event.description ?: event.command ?: event.path,
                 ),
@@ -81,13 +95,21 @@ internal fun reduceGatewayEvent(
             } else {
                 notice(DesktopNotice("approval:$key", false, "approval pending — respond on desktop", origin))
             }
-        is GatewayEvent.ApprovalReceived -> remove(false, event.requestId)
+        is GatewayEvent.ApprovalReceived -> state
+        is GatewayEvent.ApprovalCancelled -> {
+            val ids = event.requestIds
+            val notices =
+                state.desktopNotices[key].orEmpty().filterNot {
+                    !it.clarification && (ids.isEmpty() || it.id in ids || it.id == "approval:$key")
+                }
+            state.copy(desktopNotices = state.desktopNotices + (key to notices))
+        }
         is GatewayEvent.ClarifyRequested ->
             notice(
                 DesktopNotice(
                     id = event.clarifyId ?: "clarify:$key",
                     clarification = true,
-                    title = "clarification pending — respond on desktop",
+                    title = "clarification pending",
                     origin = origin,
                     detail = event.text ?: event.questions.firstOrNull()?.question,
                 ),
@@ -96,5 +118,41 @@ internal fun reduceGatewayEvent(
         else -> state
     }
 }
+
+/** A confirmed RPC resolution or pending snapshot, not a display acknowledgement. */
+internal fun AppState.settleApproval(
+    session: String,
+    requestId: String?,
+): AppState {
+    val notices =
+        desktopNotices[session].orEmpty().filterNot {
+            !it.clarification && (requestId == null || it.id == requestId || it.id == "approval:$session")
+        }
+    val conversation = conversations[session]?.settleApprovalResponse(requestId)
+    return copy(
+        desktopNotices = desktopNotices + (session to notices),
+        conversations = if (conversation == null) conversations else conversations + (session to conversation),
+    )
+}
+
+internal fun AppState.clearMissingSession(id: String): AppState =
+    if (selectedSession != id) {
+        this
+    } else {
+        copy(
+            selectedSession = null,
+            messages = emptyList(),
+            positionRow = null,
+            positionOffset = 0,
+            threadHasOlder = false,
+            threadHasNewer = false,
+            threadLoading = false,
+            operationError = null,
+            conversations = conversations - id,
+            desktopNotices = desktopNotices - id,
+            liveSessions = liveSessions - id,
+            sessionsRequired = true,
+        )
+    }
 
 internal const val GLOBAL_NOTICE = "\u0000dashboard"

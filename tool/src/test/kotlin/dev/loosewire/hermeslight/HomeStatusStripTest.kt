@@ -55,7 +55,7 @@ class HomeStatusStripTest {
                 listOf(
                     AppState(),
                     reduceGatewayEvent(running, GatewayEvent.Done("a")),
-                    reduceGatewayEvent(pending, GatewayEvent.ApprovalReceived(null, "a")),
+                    reduceGatewayEvent(pending, GatewayEvent.ApprovalCancelled("a")),
                 )
             for (state in idleStates) {
                 for (focused in listOf(false, true)) {

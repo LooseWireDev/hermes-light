@@ -19,9 +19,11 @@ class StatusStripTest {
         val running = AppState(selectedSession = "selected", liveSessions = setOf("running"))
         val pending = reduceGatewayEvent(running, GatewayEvent.ApprovalPending("approval-session"))
         assertEquals(StatusStripUi("1 approval · 1 running", "approval-session"), pending.statusStripUi())
-        val received = reduceGatewayEvent(pending, GatewayEvent.ApprovalReceived(null, "approval-session"))
-        assertEquals(StatusStripUi("1 running", "running"), received.statusStripUi())
-        assertNull(reduceGatewayEvent(received, GatewayEvent.Done("running")).statusStripUi())
+        val acknowledged = reduceGatewayEvent(pending, GatewayEvent.ApprovalReceived(null, "approval-session"))
+        assertEquals(pending.statusStripUi(), acknowledged.statusStripUi())
+        val cancelled = reduceGatewayEvent(acknowledged, GatewayEvent.ApprovalCancelled("approval-session"))
+        assertEquals(StatusStripUi("1 running", "running"), cancelled.statusStripUi())
+        assertNull(reduceGatewayEvent(cancelled, GatewayEvent.Done("running")).statusStripUi())
     }
 
     @Test
