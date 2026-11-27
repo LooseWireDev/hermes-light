@@ -1,12 +1,15 @@
 /*
  * Copyright 2026 LooseWireDev
  *
- * Stored/runtime session identity and the latest-descendant contract follow Hermes Mobile
+ * Stored/runtime session identity, latest-descendant and resume contracts follow Hermes Mobile
  * (https://github.com/Hy4ri/hermes-mobile), licensed under the Apache
  * License, Version 2.0. See NOTICE.
  */
 package dev.loosewire.hermeslight.net
 
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
@@ -15,37 +18,55 @@ import kotlinx.serialization.json.put
 /** Foreground-scope owned; replace on profile/connection changes, never persist runtime ids. */
 internal class SessionRuntime(
     private val resolve: suspend (String) -> String,
+    private val resumeSession: suspend (String) -> String,
     private val request: suspend (JsonObject) -> JsonElement?,
 ) {
     private val currentIds = mutableMapOf<String, String>()
     private val storedIds = mutableMapOf<String, String>()
+    private val resumeMutex = Mutex()
 
     fun runtimeId(storedId: String): String = currentIds[storedId] ?: storedId
 
     // Retain old aliases until reconnect: an earlier turn may still emit its final events.
     fun storedId(runtimeId: String): String = storedIds[runtimeId] ?: runtimeId
 
+    /** Opening a thread and its first submit share one resume, even when they overlap. */
+    suspend fun resume(storedId: String): String =
+        resumeMutex.withLock {
+            currentIds[storedId] ?: refresh(storedId)
+        }
+
     suspend fun submit(
         storedId: String,
         text: String,
         queued: Boolean,
     ): JsonElement? {
-        val current = currentIds[storedId] ?: refresh(storedId)
+        val current = resume(storedId)
         try {
             return submitTo(current, text, queued)
         } catch (error: GatewayRpcException) {
             if (!error.isSessionNotFound()) throw error
         }
         // Only an explicit refusal is safe to retry. Unknown transport outcomes pass through.
-        currentIds.remove(storedId)
-        val refreshed = refresh(storedId)
+        val refreshed =
+            resumeMutex.withLock {
+                val cached = currentIds[storedId]
+                if (cached != null && cached != current) {
+                    cached
+                } else {
+                    currentIds.remove(storedId)
+                    refresh(storedId)
+                }
+            }
         try {
             return submitTo(refreshed, text, queued)
         } catch (error: GatewayRpcException) {
             if (!error.isSessionNotFound()) throw error
-            currentIds.remove(storedId)
+            resumeMutex.withLock {
+                if (currentIds[storedId] == refreshed) currentIds.remove(storedId)
+            }
             throw GatewayRpcException(
-                message = "Session not found after refreshing its current id — reopen from Sessions or create on desktop",
+                message = "Session not found after resuming again — reopen from Sessions or create on desktop",
                 kind = RpcFailureKind.REJECTED,
                 code = 4001,
                 cause = error,
@@ -54,7 +75,20 @@ internal class SessionRuntime(
     }
 
     private suspend fun refresh(storedId: String): String {
-        val current = resolve(storedId)
+        // descendant (stored tip) → resume (runtime id) → submit; REST alone never creates a runtime.
+        val tip = resolve(storedId)
+        val current =
+            try {
+                resumeSession(tip)
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                // A resume timeout is not an unknown prompt outcome: no prompt was sent yet.
+                throw IllegalStateException(
+                    "Session resume failed; prompt was not sent: ${error.message ?: "dashboard unavailable"}",
+                    error,
+                )
+            }
         currentIds[storedId] = current
         storedIds[current] = storedId
         return current

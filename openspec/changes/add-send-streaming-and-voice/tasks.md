@@ -85,7 +85,7 @@ the wheel to talk — as long as you like, because dictation is chunked and stit
 
 ## 10. M1.2 — resume for a runtime id (device blocker #2)
 
-- [ ] 10.1 When a thread opens (and before the first submit), call `session.resume {session_id, source: "desktop"}` and use the returned `session_id` as the runtime id for submit and for event correlation; cache it per stored id and refresh on 4001.
-- [ ] 10.2 Keep `latest-descendant` as the tip resolver (it returns the stored tip, not the runtime id) — document that order in the code: descendant → resume → submit.
-- [ ] 10.3 Log RPC failures (method, code, message — never tokens) at debug level so device failures are diagnosable from logcat.
-- [ ] 10.4 Unit tests: resume-then-submit happy path; 4001 → resume → retry; resume failure surfaces a specific error.
+- [x] 10.1 When a thread opens (and before the first submit), call `session.resume {session_id, source: "desktop"}` and use the returned `session_id` as the runtime id for submit and for event correlation; cache it per stored id and refresh on 4001.
+- [x] 10.2 Keep `latest-descendant` as the tip resolver (it returns the stored tip, not the runtime id) — document that order in the code: descendant → resume → submit.
+- [x] 10.3 Log RPC failures (method, code, message — never tokens) at debug level so device failures are diagnosable from logcat.
+- [x] 10.4 Unit tests: resume-then-submit happy path; 4001 → resume → retry; resume failure surfaces a specific error.

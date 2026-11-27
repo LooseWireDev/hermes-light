@@ -7,6 +7,7 @@
  */
 package dev.loosewire.hermeslight.net
 
+import android.util.Log
 import kotlinx.coroutines.CancellableContinuation
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -19,8 +20,10 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withTimeout
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import okhttp3.OkHttpClient
@@ -128,6 +131,85 @@ class GatewayRpcException(
     val code: Int? = null,
     cause: Throwable? = null,
 ) : Exception(message, cause)
+
+/**
+ * Debug logcat line for one failed command. A gateway may echo request values in its error
+ * message, so redact those values as well as credential formats before crossing the log boundary.
+ */
+internal fun rpcFailureLogLine(
+    method: String,
+    failure: GatewayRpcException,
+    params: JsonObject? = null,
+    credential: String? = null,
+): String {
+    val code = failure.code?.toString() ?: "none"
+    val message = redactGatewayText(failure.message.orEmpty(), params, credential)
+    return "rpc $method failed: code=$code kind=${failure.kind} message=$message"
+}
+
+private val CREDENTIAL_WORD =
+    Regex(
+        """["']?\b(token|ticket|password|secret|api[_-]?key)["']?\s*[:=]\s*("(?:\\.|[^"\\])*"|'[^']*'|[^&\s,}\]]+)""",
+        RegexOption.IGNORE_CASE,
+    )
+private val BEARER_CREDENTIAL = Regex("""\bBearer\s+[^\s"',;}]+""", RegexOption.IGNORE_CASE)
+
+private fun redactGatewayText(
+    message: String,
+    params: JsonObject? = null,
+    credential: String? = null,
+): String {
+    // Match against the original message: replacing one secret must not hide another match.
+    val ranges = mutableListOf<IntRange>()
+    CREDENTIAL_WORD.findAll(message).forEach { ranges.add(it.range) }
+    BEARER_CREDENTIAL.findAll(message).forEach { ranges.add(it.range) }
+    if (params != null) addRequestRedactions(message, params, ranges)
+    if (!credential.isNullOrEmpty()) addLiteralRedactions(message, credential, ranges)
+    if (ranges.isEmpty()) return message
+    ranges.sortBy { it.first }
+    return buildString {
+        var cursor = 0
+        for (range in ranges) {
+            if (range.last < cursor) continue
+            if (range.first >= cursor) {
+                append(message, cursor, range.first)
+                append("<redacted>")
+            }
+            cursor = range.last + 1
+        }
+        append(message, cursor, message.length)
+    }
+}
+
+private fun addRequestRedactions(
+    message: String,
+    value: JsonElement,
+    ranges: MutableList<IntRange>,
+) {
+    when (value) {
+        is JsonObject -> value.values.forEach { addRequestRedactions(message, it, ranges) }
+        is JsonArray -> value.forEach { addRequestRedactions(message, it, ranges) }
+        is JsonPrimitive ->
+            if (value.isString && value.content.isNotEmpty()) {
+                addLiteralRedactions(message, value.content, ranges)
+                val escaped = value.toString().removeSurrounding("\"")
+                if (escaped != value.content) addLiteralRedactions(message, escaped, ranges)
+            }
+        else -> Unit
+    }
+}
+
+private fun addLiteralRedactions(
+    message: String,
+    value: String,
+    ranges: MutableList<IntRange>,
+) {
+    var start = message.indexOf(value)
+    while (start >= 0) {
+        ranges.add(start until start + value.length)
+        start = message.indexOf(value, start + 1)
+    }
+}
 
 /**
  * JSON-RPC gateway client.
@@ -242,9 +324,10 @@ class Gateway(
         synchronized(lock) {
             val active = socket
             if (!connected || !foreground || manualDisconnect || active == null) {
-                throw GatewayRpcException(
-                    "Not connected to the dashboard — $method was not sent",
-                    RpcFailureKind.NOT_CONNECTED,
+                throw rpcFailure(
+                    method = method,
+                    message = "Not connected to the dashboard — $method was not sent",
+                    kind = RpcFailureKind.NOT_CONNECTED,
                 )
             }
             id = "hl-${++requestSequence}"
@@ -261,7 +344,7 @@ class Gateway(
         return try {
             withTimeout(timeoutMillis) {
                 suspendCancellableCoroutine<JsonElement?> { continuation ->
-                    val call = PendingCall(method, socketGeneration, continuation)
+                    val call = PendingCall(method, socketGeneration, params, continuation)
                     val registered =
                         synchronized(lock) {
                             if (connected &&
@@ -278,9 +361,10 @@ class Gateway(
                         }
                     if (!registered) {
                         continuation.resumeWithException(
-                            GatewayRpcException(
-                                "Connection changed before $method was sent",
-                                RpcFailureKind.NOT_CONNECTED,
+                            rpcFailure(
+                                method = method,
+                                message = "Connection changed before $method was sent",
+                                kind = RpcFailureKind.NOT_CONNECTED,
                             ),
                         )
                         return@suspendCancellableCoroutine
@@ -292,9 +376,10 @@ class Gateway(
                         val removed = synchronized(lock) { pendingCalls.remove(id) }
                         if (removed != null) {
                             removed.fail(
-                                GatewayRpcException(
-                                    "$method could not be sent — outcome unknown",
-                                    RpcFailureKind.CONNECTION_LOST,
+                                rpcFailure(
+                                    method = method,
+                                    message = "$method could not be sent — outcome unknown",
+                                    kind = RpcFailureKind.CONNECTION_LOST,
                                 ),
                             )
                         }
@@ -306,11 +391,65 @@ class Gateway(
             // cancellation so structured concurrency still works.
             if (!currentCoroutineContext().isActive) throw timeout
             synchronized(lock) { pendingCalls.remove(id) }
-            throw GatewayRpcException(
-                "$method timed out after ${timeoutMillis}ms — outcome unknown",
-                RpcFailureKind.TIMEOUT,
+            throw rpcFailure(
+                method = method,
+                message = "$method timed out after ${timeoutMillis}ms — outcome unknown",
+                kind = RpcFailureKind.TIMEOUT,
             )
         }
+    }
+
+    /**
+     * Resume the stored session [storedTipId] as the Desktop surface and return the runtime
+     * session id the dashboard is now serving.
+     *
+     * [storedTipId] is the stored latest descendant, not a runtime id. REST hydration supplies
+     * the transcript, so the resume reply omits messages. The dashboard may mint a runtime id
+     * that differs from [storedTipId]; callers must use the returned value and never fall back to
+     * the stored id. A reply without a nonblank string `session_id` is a failure.
+     */
+    suspend fun resumeSession(
+        storedTipId: String,
+        profile: String? = null,
+    ): String {
+        require(storedTipId.isNotBlank()) { "storedTipId must not be blank" }
+        val params =
+            buildJsonObject {
+                put("session_id", storedTipId)
+                put("source", DESKTOP_SESSION_SOURCE)
+                put("omit_messages", true)
+                profile?.takeIf { it.isNotBlank() }?.let { put("profile", it) }
+            }
+        val result = request("session.resume", params)
+        val runtimeId = (result as? JsonObject)?.get("session_id").asStringOrNull()
+        if (runtimeId.isNullOrBlank()) {
+            throw rpcFailure(
+                method = "session.resume",
+                message = "Dashboard did not return a runtime session_id from session.resume",
+                kind = RpcFailureKind.REJECTED,
+            )
+        }
+        return runtimeId
+    }
+
+    /**
+     * Build one command failure and log it. Every [request] failure path goes through here, so a
+     * debug log names the method and outcome without ever carrying params or prompt text.
+     */
+    private fun rpcFailure(
+        method: String,
+        message: String,
+        kind: RpcFailureKind,
+        code: Int? = null,
+        cause: Throwable? = null,
+        params: JsonObject? = null,
+    ): GatewayRpcException {
+        val failure = GatewayRpcException(message, kind, code, cause)
+        // android.util.Log is a throwing stub in plain JVM unit tests; diagnostics must never
+        // change the command's outcome.
+        val credential = synchronized(lock) { target?.credential }
+        runCatching { Log.d(LOG_TAG, rpcFailureLogLine(method, failure, params, credential)) }
+        return failure
     }
 
     /**
@@ -591,9 +730,10 @@ class Gateway(
     ) {
         calls.forEach { call ->
             call.fail(
-                GatewayRpcException(
-                    "${call.method} interrupted by $reason — outcome unknown",
-                    RpcFailureKind.CONNECTION_LOST,
+                rpcFailure(
+                    method = call.method,
+                    message = "${call.method} interrupted by $reason — outcome unknown",
+                    kind = RpcFailureKind.CONNECTION_LOST,
                 ),
             )
         }
@@ -634,10 +774,12 @@ class Gateway(
                 ?.let { ": $it" }
                 .orEmpty()
         call.fail(
-            GatewayRpcException(
-                "Dashboard rejected ${call.method}$codeText$detail",
-                RpcFailureKind.REJECTED,
-                error.code,
+            rpcFailure(
+                method = call.method,
+                message = "Dashboard rejected ${call.method}$codeText$detail",
+                kind = RpcFailureKind.REJECTED,
+                code = error.code,
+                params = call.params,
             ),
         )
     }
@@ -660,6 +802,7 @@ class Gateway(
     private class PendingCall(
         val method: String,
         val generation: Int,
+        val params: JsonObject,
         private val continuation: CancellableContinuation<JsonElement?>,
     ) {
         fun succeed(result: JsonElement?) {
@@ -772,7 +915,7 @@ class Gateway(
                 when {
                     code != null -> "Live connection refused (HTTP $code)"
                     t.message.isNullOrBlank() -> "Live connection failed"
-                    else -> "Live connection failed — ${redactTransportError(t.message.orEmpty())}"
+                    else -> "Live connection failed — ${redactGatewayText(t.message.orEmpty())}"
                 }
             handleTransportFailure(generation = socketGeneration, message = message)
         }
@@ -787,17 +930,13 @@ class Gateway(
             reason.contains("unauthorized", ignoreCase = true) ||
             reason.startsWith("auth:", ignoreCase = true)
 
-    private fun redactTransportError(message: String): String =
-        CREDENTIAL_QUERY.replace(message.replace(CREDENTIAL_WORD, "$1=REDACTED"), "<redacted>")
-
     companion object {
         private const val CLIENT_NAME = "hermes-light"
+        private const val LOG_TAG = "HermesLightGateway"
         private const val CLOSE_NORMAL = 1000
+        private const val DESKTOP_SESSION_SOURCE = "desktop"
 
         /** Default bound on one [request]; after it the command's outcome is unknown. */
         const val DEFAULT_REQUEST_TIMEOUT_MILLIS: Long = 20_000L
-
-        private val CREDENTIAL_WORD = Regex("""\b(token|ticket)=[^&\s]+""")
-        private val CREDENTIAL_QUERY = Regex("""[?&](token|ticket)=[^&\s]+""")
     }
 }

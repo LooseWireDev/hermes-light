@@ -150,3 +150,46 @@ accepted.
   — **BUILD SUCCESSFUL in 4s; 148 tests across 20 files, zero failures/errors/skips**.
   The first run found one ktlint chain-wrapping issue; it was fixed before this final green run.
   Debug artifact: `tool/build/outputs/apk/debug/tool-debug.apk`.
+
+## 2026-11-27 — task group 10: M1.2 runtime resume
+
+- Corrects task group 9's protocol assumption: `latest-descendant` returns the stored transcript
+  tip, not a runtime id. Reference `RpcMethods.SESSION_RESUME`, `SessionPrompt` and
+  `ChatViewModel.resumeSession` confirm `session.resume` with `source: "desktop"` returns the
+  runtime `session_id`. Reference files remain read only; derived-source attribution and `NOTICE`
+  retain Apache-2.0 provenance.
+- Thread opening and the first submit share a serialized, cached resume per stored session:
+  descendant (stored tip) → resume (runtime id) → submit. Resume sends `omit_messages: true`
+  because REST already hydrates the transcript, and includes the selected profile when present.
+  Submit and interrupt use the resumed runtime id; incoming runtime events map to the original
+  stored conversation. Old runtime aliases remain available for late events.
+- An explicit `4001 session not found` re-resolves and resumes once before retrying unchanged
+  prompt text/queue state. A second refusal is terminal. Submit timeout/socket loss never resends.
+  Resume failure has a specific error and restores an unsent draft, including a resume timeout:
+  an unknown resume outcome is not an unknown prompt outcome.
+- Unit coverage extends the previous identity/retry cases with a distinct stored tip/runtime id,
+  open-before-submit cache reuse, event routing, overlapping open/submit, resume rejection/timeout
+  draft restoration and resume failure during the single 4001 refresh.
+- Every gateway RPC failure path emits `Log.d` with method, code and message. Pending RPCs retain
+  their existing params by reference solely to redact raw/JSON-escaped values if a rejection
+  message echoes them; request bodies are never appended to logs. The active credential and
+  case-insensitive token/ticket/password/secret/API-key assignments and Bearer credentials are
+  redacted too. Logging cannot change outcomes when the plain JVM Android log stub throws.
+  Transport tests cover desktop-source resume, optional profile, missing/invalid runtime ids,
+  rejection propagation, echoed prompt/clarification bodies and diagnostic credential formats.
+- Local/development lane; existing composite SDK, dependencies, metadata and UI widgets unchanged.
+  No adb/emulator, live gateway, install, upload, push or device acceptance in this run. The user
+  owns device confirmation; this change does not claim a successful live submit or sync accepted
+  device behavior into `openspec/specs/`.
+- Canonical Obsidian vault is still unavailable: `/home/gav/Documents/obsidian-vault/Home.md`
+  was not found. This evidence note records the durable protocol correction instead.
+- Verification after the last code edit, with the requested `ANDROID_HOME`, `JAVA_HOME`, Java 21
+  on PATH and Java-installation paths:
+  `./gradlew -Porg.gradle.java.installations.paths="$HOME/.local/share/light-tern-toolchain/jdk17,$HOME/.local/opt/temurin21" ktlintCheck checkColorLiterals :tool:testDebugUnitTest :tool:assembleDebug --continue --console=plain`
+  — **BUILD SUCCESSFUL in 7s; 156 tests across 20 files, zero failures/errors/skips**.
+  The initial gate run found ktlint wrapping and a transport-test helper type mismatch; both were
+  corrected before the final green run. Existing SDK publication and compile-SDK warnings remain.
+  Debug artifact: `tool/build/outputs/apk/debug/tool-debug.apk`.
+- Final privacy-hardening verification supersedes the counts above: the same four-gate command
+  passed after redacting echoed raw/JSON-escaped request values, overlapping secrets and mixed-case
+  credential formats — **BUILD SUCCESSFUL in 6s; 157 tests, zero failures/errors/skips**.

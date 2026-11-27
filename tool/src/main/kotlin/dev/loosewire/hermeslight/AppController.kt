@@ -317,6 +317,12 @@ internal class AppController(
                             check(epoch == connectionEpoch) { "Connection changed before the prompt was sent" }
                             id
                         },
+                        resumeSession = { tip ->
+                            check(epoch == connectionEpoch) { "Connection changed before the session was resumed" }
+                            val id = gateway.resumeSession(tip, selectedProfile(authenticated))
+                            check(epoch == connectionEpoch) { "Connection changed while the session was resuming" }
+                            id
+                        },
                         request = { params ->
                             check(epoch == connectionEpoch) { "Connection changed before the prompt was sent" }
                             gateway.request("prompt.submit", params)
@@ -410,6 +416,7 @@ internal class AppController(
         remembered: Boolean = false,
     ) {
         val saved = profile ?: return
+        val runtime = sessionRuntime
         threadJob?.cancel()
         val row = saved.readPositions[id]
         mutable.update {
@@ -441,6 +448,7 @@ internal class AppController(
                         val page = api.messages(endpoint, id, profile = selectedProfile(saved))
                         mutable.update { it.copy(messages = page.messages, threadHasOlder = page.hasOlder, threadHasNewer = false) }
                     }
+                    checkNotNull(runtime) { "Not connected to the dashboard — session was not resumed" }.resume(id)
                     if (remembered && mutable.value.conversations[id]?.stream != null) refreshLatest(id)
                 } catch (error: CancellationException) {
                     throw error
@@ -763,12 +771,14 @@ internal class AppController(
     }
 
     private fun stop(session: String) {
+        val runtime = sessionRuntime ?: return
         val current = mutable.value.conversations[session] ?: Conversation(running = session in mutable.value.liveSessions)
         if (!current.running || current.stopping) return
         updateConversation(session) { it.copy(running = true).beginStop() }
         scope.launch {
             try {
-                gateway.request("session.interrupt", buildJsonObject { put("session_id", runtimeId(session)) })
+                val id = runtime.resume(session)
+                gateway.request("session.interrupt", buildJsonObject { put("session_id", id) })
                 updateConversation(session) { it.stopResult() }
             } catch (error: CancellationException) {
                 throw error

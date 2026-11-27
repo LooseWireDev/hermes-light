@@ -12,15 +12,20 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.put
 import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.TimeUnit
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
+import kotlin.test.assertNotEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
@@ -133,6 +138,214 @@ class GatewayTransportTest {
                 scope.cancel()
             }
         }
+
+    @Test
+    fun `resumeSession resumes on the desktop surface and returns the reply's runtime id`() =
+        runBlocking {
+            val commands = LinkedBlockingQueue<String>()
+            val server =
+                TestWebSocketServer { ws, _ ->
+                    ws.sendText(readyFrame())
+                    val capabilities = ws.awaitText() ?: error("missing capabilities")
+                    ws.sendText(resultFrame(idOf(capabilities), "{}"))
+                    val command = ws.awaitText() ?: error("missing resume command")
+                    commands.put(command)
+                    ws.sendText(resultFrame(idOf(command), """{"session_id":"runtime-9","messages":[]}"""))
+                    ws.awaitText(500)
+                }
+            val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
+            try {
+                server.use {
+                    val listener = RecordingListener()
+                    val gateway = Gateway(scope, listener, newHttpClient(), fastConfig())
+                    gateway.connect(connection(server))
+                    listener.awaitConnected()
+
+                    val runtimeId = withTimeout(TEST_TIMEOUT) { gateway.resumeSession("stored-tip") }
+                    assertEquals("runtime-9", runtimeId)
+                    assertNotEquals("stored-tip", runtimeId)
+
+                    val frame = params(commands.poll(2, TimeUnit.SECONDS) ?: error("no resume command"))
+                    assertEquals("session.resume", frame.getValue("method").jsonPrimitive.content)
+                    val resume = frame.getValue("params").jsonObject
+                    assertEquals("stored-tip", resume.getValue("session_id").jsonPrimitive.content)
+                    assertEquals("desktop", resume.getValue("source").jsonPrimitive.content)
+                    assertEquals("true", resume.getValue("omit_messages").jsonPrimitive.content)
+                    assertFalse(resume.containsKey("profile"))
+                }
+            } finally {
+                scope.cancel()
+            }
+        }
+
+    @Test
+    fun `resumeSession forwards a nonblank profile and omits a blank one`() =
+        runBlocking {
+            val commands = LinkedBlockingQueue<String>()
+            val server =
+                TestWebSocketServer { ws, _ ->
+                    ws.sendText(readyFrame())
+                    val capabilities = ws.awaitText() ?: error("missing capabilities")
+                    ws.sendText(resultFrame(idOf(capabilities), "{}"))
+                    repeat(2) { index ->
+                        val command = ws.awaitText() ?: error("missing resume command")
+                        commands.put(command)
+                        ws.sendText(resultFrame(idOf(command), """{"session_id":"runtime-${index + 1}"}"""))
+                    }
+                    ws.awaitText(500)
+                }
+            val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
+            try {
+                server.use {
+                    val listener = RecordingListener()
+                    val gateway = Gateway(scope, listener, newHttpClient(), fastConfig())
+                    gateway.connect(connection(server))
+                    listener.awaitConnected()
+
+                    assertEquals(
+                        "runtime-1",
+                        withTimeout(TEST_TIMEOUT) { gateway.resumeSession("stored-tip", "work") },
+                    )
+                    assertEquals(
+                        "runtime-2",
+                        withTimeout(TEST_TIMEOUT) { gateway.resumeSession("stored-tip", "   ") },
+                    )
+
+                    val withProfile = commandParams(commands.poll(2, TimeUnit.SECONDS) ?: error("no first resume"))
+                    val blankProfile = commandParams(commands.poll(2, TimeUnit.SECONDS) ?: error("no second resume"))
+                    assertEquals("work", withProfile.getValue("profile").jsonPrimitive.content)
+                    assertFalse(blankProfile.containsKey("profile"))
+                }
+            } finally {
+                scope.cancel()
+            }
+        }
+
+    @Test
+    fun `resumeSession fails without a nonblank runtime id and never falls back to the stored tip`() =
+        runBlocking {
+            val server =
+                TestWebSocketServer { ws, _ ->
+                    ws.sendText(readyFrame())
+                    val capabilities = ws.awaitText() ?: error("missing capabilities")
+                    ws.sendText(resultFrame(idOf(capabilities), "{}"))
+                    val replies =
+                        listOf(
+                            """{"stored_session_id":"stored-tip"}""",
+                            """{"session_id":17}""",
+                            """{"session_id":"   "}""",
+                        )
+                    for (reply in replies) {
+                        val command = ws.awaitText() ?: error("missing resume command")
+                        ws.sendText(resultFrame(idOf(command), reply))
+                    }
+                    ws.awaitText(500)
+                }
+            val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
+            try {
+                server.use {
+                    val listener = RecordingListener()
+                    val gateway = Gateway(scope, listener, newHttpClient(), fastConfig())
+                    gateway.connect(connection(server))
+                    listener.awaitConnected()
+
+                    repeat(3) {
+                        val failure =
+                            assertFailsWith<GatewayRpcException> {
+                                withTimeout(TEST_TIMEOUT) { gateway.resumeSession("stored-tip") }
+                            }
+                        assertEquals(RpcFailureKind.REJECTED, failure.kind)
+                        assertNull(failure.code)
+                        assertTrue(failure.message.orEmpty().contains("session.resume"))
+                        assertTrue(failure.message.orEmpty().contains("session_id"))
+                        assertFalse(failure.message.orEmpty().contains("stored-tip"))
+                    }
+                }
+            } finally {
+                scope.cancel()
+            }
+        }
+
+    @Test
+    fun `resumeSession passes a dashboard rejection through unchanged`() =
+        runBlocking {
+            val server =
+                TestWebSocketServer { ws, _ ->
+                    ws.sendText(readyFrame())
+                    val capabilities = ws.awaitText() ?: error("missing capabilities")
+                    ws.sendText(resultFrame(idOf(capabilities), "{}"))
+                    val command = ws.awaitText() ?: error("missing resume command")
+                    ws.sendText(errorFrame(idOf(command), 4001, "session not found"))
+                    ws.awaitText(500)
+                }
+            val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
+            try {
+                server.use {
+                    val listener = RecordingListener()
+                    val gateway = Gateway(scope, listener, newHttpClient(), fastConfig())
+                    gateway.connect(connection(server))
+                    listener.awaitConnected()
+
+                    val failure =
+                        assertFailsWith<GatewayRpcException> {
+                            withTimeout(TEST_TIMEOUT) { gateway.resumeSession("stored-tip") }
+                        }
+                    assertEquals(RpcFailureKind.REJECTED, failure.kind)
+                    assertEquals(4001, failure.code)
+                    assertTrue(failure.message.orEmpty().contains("session.resume"))
+                    assertTrue(failure.message.orEmpty().contains("session not found"))
+                    assertFalse(failure.message.orEmpty().contains("stored-tip"))
+                }
+            } finally {
+                scope.cancel()
+            }
+        }
+
+    @Test
+    fun `rpc failure logging carries method code and message but redacts credentials`() {
+        val failure =
+            GatewayRpcException(
+                "Dashboard rejected session.resume (code 4001): token=super-secret&ticket=t-9 session not found",
+                RpcFailureKind.REJECTED,
+                code = 4001,
+            )
+
+        val line = rpcFailureLogLine("session.resume", failure)
+
+        assertTrue(line.contains("session.resume"))
+        assertTrue(line.contains("4001"))
+        assertTrue(line.contains("session not found"))
+        assertFalse(line.contains("super-secret"))
+        assertFalse(line.contains("t-9"))
+        assertFalse(line.contains("session_id"))
+    }
+
+    @Test
+    fun `rpc failure logs redact raw and JSON escaped bodies plus credential formats`() {
+        val text = "private \"prompt\"\nbody token=inner-secret tail"
+        val answer = "private clarification"
+        val params =
+            buildJsonObject {
+                put("text", text)
+                put("answers", JsonArray(listOf(JsonPrimitive(answer), JsonPrimitive("TOKEN"))))
+            }
+        val failure =
+            GatewayRpcException(
+                "invalid params: $text encoded=${JsonPrimitive(text)} answer=$answer " +
+                    """{"TOKEN":"json-secret","ticket":"json-ticket"} Authorization: bEaReR bearer-secret bare-live-token""",
+                RpcFailureKind.REJECTED,
+                code = 4001,
+            )
+
+        val line = rpcFailureLogLine("prompt.submit", failure, params, credential = "bare-live-token")
+
+        assertTrue(line.contains("prompt.submit"))
+        assertTrue(line.contains("code=4001"))
+        assertTrue(line.contains("invalid params"))
+        for (sensitive in listOf(text, "private", "inner-secret", "json-secret", "json-ticket", "bearer-secret", "bare-live-token")) {
+            assertFalse(line.contains(sensitive), "Sensitive request or credential value reached the log")
+        }
+    }
 
     @Test
     fun `a closed socket fails the command as outcome unknown and never replays it`() =
@@ -433,5 +646,7 @@ class GatewayTransportTest {
         ): String = """{"jsonrpc":"2.0","id":"$id","error":{"code":$code,"message":"$message"}}"""
 
         fun params(text: String): JsonObject = hermesJson.parseToJsonElement(text).jsonObject
+
+        fun commandParams(frame: String): JsonObject = params(frame).getValue("params").jsonObject
     }
 }

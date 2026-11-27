@@ -149,7 +149,7 @@ class Api(
         )
     }
 
-    /** The newest session leaf; never substitute the stored id on a failed resolution. */
+    /** Stored transcript tip, not a runtime id; resume it before submitting a prompt. */
     suspend fun latestDescendant(
         endpoint: Endpoint,
         id: String,
