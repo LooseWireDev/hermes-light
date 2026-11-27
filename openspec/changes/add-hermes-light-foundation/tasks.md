@@ -7,8 +7,8 @@ ticking anything visual. Do not start M1 features early (no sending, no voice, n
 
 - [x] 1.1 New Gradle project: `settings.gradle.kts`, root `build.gradle.kts`, `gradle/libs.versions.toml`, wrapper; Kotlin + Compose + `com.thelightphone.sdk` dependency per light-sdk docs (`docs/building`).
 - [x] 1.2 `tool/build.gradle.kts`: package `dev.loosewire.hermeslight`, module `:tool` per the SDK layout, SDK via includeBuild(../light-sdk/plugin), compileSdk 37, minSdk 34, ktlint + checkColorLiterals tasks mirroring light-tern; `NOTICE` with the Apache-2.0 attribution for hermes-mobile-derived protocol handling.
-- [ ] 1.3 SDK-generated manifest/activity + `@InitialScreen MainActivity : SimpleLightScreen<Unit>` receiving `SealedLightActivity`, AMOLED black theme via `LightThemeTokens`, Home shell and wheel contract.
-- [ ] 1.4 `./gradlew assembleDebug` + install on the LP3 AVD; screenshot of the booting shell.
+- [x] 1.3 SDK-generated manifest/activity + `@InitialScreen MainActivity : SimpleLightScreen<Unit>` receiving `SealedLightActivity`, AMOLED black theme via `LightThemeTokens`, Home shell and wheel contract.
+- [x] 1.4 `./gradlew assembleDebug` + install on the LP3 AVD; screenshot of the booting shell.
 
 ## 2. Data plane
 
@@ -20,18 +20,18 @@ ticking anything visual. Do not start M1 features early (no sending, no voice, n
 
 ## 3. Screens (read-only)
 
-- [ ] 3.1 `SetupScreen`: URL field + sign-in/token paths, connect test row, status line; persisted profile; acceptance: loopback token connect works on the AVD, wrong URL shows an honest error within 25s.
-- [ ] 3.2 `SessionsScreen`: Light row list (title / source / age / live dot), wheel scroll, click opens thread; footer "Bots" row; acceptance: ≥50 sessions listed, wheel reaches the last row, fetch paged on wheel-end.
-- [ ] 3.3 `ThreadScreen`: bottom-anchored transcript with minimal markdown (bold, inline code, fenced code, underlined links), tool/reasoning one-liners, wheel-up paging via `messages/around`, position restore per session.
+- [x] 3.1 `SetupScreen`: URL field + sign-in/token paths, connect test row, status line; persisted profile; acceptance: loopback token connect works on the AVD, wrong URL shows an honest error within 25s.
+- [x] 3.2 `SessionsScreen`: Light row list (title / source / age / live dot), wheel scroll, click opens thread; footer "Bots" row; acceptance: ≥50 sessions listed, wheel reaches the last row, fetch paged on wheel-end.
+- [x] 3.3 `ThreadScreen`: bottom-anchored transcript with minimal markdown (bold, inline code, fenced code, underlined links), tool/reasoning one-liners, wheel-up paging via `messages/around`, position restore per session.
 - [ ] 3.4 `BotsScreen`: rows derived from session sources/profiles with counts; click switches thread filter.
-- [ ] 3.5 `HomeScreen`: deck placeholder zone (empty state text only) + thread below + status line; wheel-up from thread reaches deck; wheel-up from deck opens Sessions.
-- [ ] 3.6 Navigation + back semantics per design.md; no Material3 chrome anywhere (`grep -r androidx.compose.material3 tool/src/main` must only match justified exceptions, listed in the commit).
+- [x] 3.5 `HomeScreen`: deck placeholder zone (empty state text only) + thread below + status line; wheel-up from thread reaches deck; wheel-up from deck opens Sessions.
+- [x] 3.6 Navigation + back semantics per design.md; no Material3 chrome anywhere (`grep -r androidx.compose.material3 tool/src/main` must only match justified exceptions, listed in the commit).
 
 ## 4. Honesty and failure states
 
 - [ ] 4.1 Status line everywhere: connecting / connected / reconnecting (n) / error text; verified by killing the dashboard mid-run.
 - [ ] 4.2 Read-only socket: if approval/clarify frames arrive, render a non-interactive "approval pending — respond on desktop" row (interactive approvals are M1).
-- [ ] 4.3 Cold start with no profile lands on Setup, never on an empty thread.
+- [x] 4.3 Cold start with no profile lands on Setup, never on an empty thread.
 
 ## 5. Install on the phone
 
