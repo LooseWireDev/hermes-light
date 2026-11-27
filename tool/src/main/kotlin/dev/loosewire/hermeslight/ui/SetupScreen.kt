@@ -17,8 +17,10 @@ import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.ui.text.style.TextOverflow
 import com.thelightphone.sdk.rememberKeyboardOptions
 import com.thelightphone.sdk.ui.LightBarButton
@@ -36,14 +38,20 @@ import dev.loosewire.hermeslight.ui.common.HintLine
 import dev.loosewire.hermeslight.ui.common.StatusLine
 import dev.loosewire.hermeslight.ui.common.WheelScroll
 import dev.loosewire.hermeslight.ui.common.consumeBackKey
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 private enum class SetupRow {
     Endpoint,
+    PasteEndpoint,
     TokenMode,
     PasswordMode,
     Token,
+    PasteToken,
     Username,
+    PasteUsername,
     Password,
+    PastePassword,
     Test,
 }
 
@@ -58,18 +66,23 @@ private fun rowsFor(mode: AuthModeUi): List<SetupRow> =
     if (mode == AuthModeUi.Token) {
         listOf(
             SetupRow.Endpoint,
+            SetupRow.PasteEndpoint,
             SetupRow.TokenMode,
             SetupRow.PasswordMode,
             SetupRow.Token,
+            SetupRow.PasteToken,
             SetupRow.Test,
         )
     } else {
         listOf(
             SetupRow.Endpoint,
+            SetupRow.PasteEndpoint,
             SetupRow.TokenMode,
             SetupRow.PasswordMode,
             SetupRow.Username,
+            SetupRow.PasteUsername,
             SetupRow.Password,
+            SetupRow.PastePassword,
             SetupRow.Test,
         )
     }
@@ -87,10 +100,21 @@ fun SetupScreen(
     actions: SetupActions,
 ) {
     val colors = LightThemeTokens.colors
+    val clipboard = LocalClipboard.current
+    val scope = rememberCoroutineScope()
     val rows = remember(state.mode) { rowsFor(state.mode) }
     val listState = rememberLazyListState()
     var focusIndex by remember { mutableIntStateOf(0) }
     var editing by remember { mutableStateOf<SetupEditor?>(null) }
+    var pasteFeedback by remember { mutableStateOf<Pair<SetupRow, String>?>(null) }
+    var pasteRevision by remember { mutableIntStateOf(0) }
+
+    LaunchedEffect(pasteRevision) {
+        if (pasteFeedback != null) {
+            delay(3_000)
+            pasteFeedback = null
+        }
+    }
 
     LaunchedEffect(rows.size) {
         focusIndex = focusIndex.coerceIn(0, rows.lastIndex)
@@ -111,6 +135,42 @@ fun SetupScreen(
             SetupEditor.Password -> actions.onPasswordChange(value)
         }
         editing = null
+    }
+
+    fun paste(
+        row: SetupRow,
+        editor: SetupEditor,
+    ) {
+        scope.launch {
+            val clip = clipboard.getClipEntry()?.clipData
+            val text =
+                clip
+                    ?.takeIf { it.itemCount > 0 }
+                    ?.getItemAt(0)
+                    ?.text
+                    ?.toString()
+            val result = pasteCredential(text)
+            result.value?.let { submit(editor, it) }
+            pasteFeedback = row to result.message
+            pasteRevision++
+        }
+    }
+
+    fun activate(row: SetupRow?) {
+        when (row) {
+            SetupRow.Endpoint -> editing = SetupEditor.Endpoint
+            SetupRow.PasteEndpoint -> paste(row, SetupEditor.Endpoint)
+            SetupRow.TokenMode -> actions.onModeChange(AuthModeUi.Token)
+            SetupRow.PasswordMode -> actions.onModeChange(AuthModeUi.Password)
+            SetupRow.Token -> editing = SetupEditor.Token
+            SetupRow.PasteToken -> paste(row, SetupEditor.Token)
+            SetupRow.Username -> editing = SetupEditor.Username
+            SetupRow.PasteUsername -> paste(row, SetupEditor.Username)
+            SetupRow.Password -> editing = SetupEditor.Password
+            SetupRow.PastePassword -> paste(row, SetupEditor.Password)
+            SetupRow.Test -> if (!state.testing) actions.onTestConnection()
+            null -> Unit
+        }
     }
 
     val editor = editing
@@ -162,18 +222,7 @@ fun SetupScreen(
         onDown = {
             if (focusIndex < rows.lastIndex) focusIndex++
         },
-        onClick = {
-            when (rows.getOrNull(focusIndex)) {
-                SetupRow.Endpoint -> editing = SetupEditor.Endpoint
-                SetupRow.TokenMode -> actions.onModeChange(AuthModeUi.Token)
-                SetupRow.PasswordMode -> actions.onModeChange(AuthModeUi.Password)
-                SetupRow.Token -> editing = SetupEditor.Token
-                SetupRow.Username -> editing = SetupEditor.Username
-                SetupRow.Password -> editing = SetupEditor.Password
-                SetupRow.Test -> if (!state.testing) actions.onTestConnection()
-                null -> Unit
-            }
-        },
+        onClick = { activate(rows.getOrNull(focusIndex)) },
         onBack = actions.onBack,
         onLongBack = actions.onLongBack,
     ) {
@@ -280,7 +329,30 @@ fun SetupScreen(
                             }
                         }
 
+                        SetupRow.PasteEndpoint,
+                        SetupRow.PasteToken,
+                        SetupRow.PasteUsername,
+                        SetupRow.PastePassword,
+                        -> {
+                            FocusRow(focused = focused, onClick = { activate(row) }) {
+                                LightText(
+                                    text =
+                                        when (row) {
+                                            SetupRow.PasteEndpoint -> "Paste Server"
+                                            SetupRow.PasteToken -> "Paste Token"
+                                            SetupRow.PasteUsername -> "Paste Username"
+                                            else -> "Paste Password"
+                                        },
+                                    variant = LightTextVariant.Copy,
+                                )
+                                pasteFeedback?.takeIf { it.first == row }?.let { (_, message) ->
+                                    LightText(text = message, variant = LightTextVariant.Superfine)
+                                }
+                            }
+                        }
+
                         SetupRow.Test -> {
+                            HintLine("Copied a password from Bitwarden? Use Paste.")
                             FocusRow(
                                 focused = focused,
                                 enabled = !state.testing,

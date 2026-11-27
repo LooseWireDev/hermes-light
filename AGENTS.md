@@ -44,6 +44,13 @@ export JAVA_HOME=$HOME/.local/opt/temurin21        # JVM 21 for all tool variant
 - SDK generates the manifest and Android activity; `MainActivity` is the `@InitialScreen`
   `SimpleLightScreen` receiving a `SealedLightActivity`, not an Android activity subclass.
 
+The SDK's `LightTextInputEditor` uses Compose `TextFieldState` and its embedded LP3 keyboard:
+no platform `EditText`, long-press paste, keyboard paste key, or password-manager autofill surface.
+Setup therefore owns explicit Paste actions until the SDK provides clipboard support; do not add
+an autofill flow. The SDK plugin blocks `LocalContext` in tools, so Setup reads the system clipboard
+through Compose's `LocalClipboard` bridge instead. Token/password rows remain masked and feedback
+contains only the trimmed character count, never clipboard contents.
+
 ## Verification
 
 - LP3 AVD: `mealforge_lpi3_ui_test_v1` on `emulator-5584` (1080×1240 @ 420dpi = 411×472dp).

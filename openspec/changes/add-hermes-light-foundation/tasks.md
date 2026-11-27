@@ -65,5 +65,9 @@ contrast step, plus the 6.5 screenshot portion, remains with the parent; those b
 
 - [ ] 7.1 Setup: Paste action per credential row (Server, Token, Username, Password) that reads the system clipboard directly into state — no SDK editor involved. Trim whitespace/newlines; confirm "pasted N characters"; hint "clipboard is empty" when blank. Keep masking for token/password.
 - [ ] 7.2 Hint line under the credential rows: "Copied a password from Bitwarden? Use Paste." (SDK editor has no autofill/paste; record the limitation in AGENTS.md).
-- [ ] 7.3 Unit tests: paste handler sets state and trims; empty clipboard is a no-op with the hint; masked length reported correctly.
+- [x] 7.3 Unit tests: paste handler sets state and trims; empty clipboard is a no-op with the hint; masked length reported correctly.
 - [ ] 7.4 Bump `lighttool.toml` to versionCode 101 / versionName 0.1.1; gates green; assembleRelease + sign for the alpha2 release.
+
+7.1–7.2 are implemented; visual boxes remain unchecked for the parent's LP3 acceptance. 7.4's
+metadata is 101 / 0.1.1; all four requested debug gates passed. Release assembly/signing remains
+with the parent, as requested. No adb/emulator driving or release signing is performed here.

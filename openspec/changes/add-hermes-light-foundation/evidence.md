@@ -93,3 +93,25 @@ New defect found: with a **stale remembered session id** at cold start, the app 
 "load failed … Not found on the dashboard (HTTP 404)" hint at the top of Sessions (the dashboard
 answers 200 for every live endpoint; the 404 is the remembered session itself). Fix: on 404 for a
 remembered session, clear the selection and land on Sessions silently. Fold into M1.
+
+## 2026-11-26 — M0.2 credentials paste
+
+Setup now has wheel/touch Paste rows for Server, Token, Username and Password, direct form-state
+updates without the SDK editor, trimmed input, masked secrets, three-second length-only/empty
+feedback, and the Bitwarden hint. Four Android-free handler tests cover trimming, blank/no-op,
+secret-safe feedback and long-token lengths beyond the 48-bullet display cap. Metadata: 101 / 0.1.1.
+
+Implementation API deviation: the active SDK plugin rejects `LocalContext` imports/usages, so the
+system clipboard is read through Compose `LocalClipboard.getClipEntry()` instead. No SDK policy
+changes, autofill implementation or new dependencies. Local/development composite SDK `main` at
+`251237ef3778c907c5dbd89e84685532c9d99a28`; pre-existing SDK changes left untouched.
+
+No adb/emulator driving, screenshots, phone install, release build/signing, upload or push.
+Parent owns LP3 layout/wheel/clipboard-to-connect acceptance and the release artifact.
+
+Verification after the final code edit, with the requested Android/JDK environment:
+`./gradlew -Porg.gradle.java.installations.paths="$HOME/.local/share/light-tern-toolchain/jdk17,$HOME/.local/opt/temurin21" ktlintCheck checkColorLiterals :tool:testDebugUnitTest :tool:assembleDebug --continue --console=plain`
+— **BUILD SUCCESSFUL in 3s**. All four gates passed, including the four new paste-handler tests.
+The initial run found only ktlint filename/chain formatting issues; fixed before the successful
+run. Existing SDK publication and AGP compile-SDK-37 warnings remain. Debug artifact:
+`tool/build/outputs/apk/debug/tool-debug.apk`.

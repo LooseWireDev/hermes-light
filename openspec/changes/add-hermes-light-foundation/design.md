@@ -66,6 +66,11 @@ Wheel contract (identical everywhere):
   lists; `WheelTalk` verbatim for M1.
 - No Material3 components for chrome. If a component is missing (e.g. a progress line), draw it with
   `Canvas`/`Box` per tokens.
+- Setup credentials have separate wheel-focusable Paste rows that read system clipboard text
+  directly into the existing form callbacks, without opening the SDK editor. Trim before applying;
+  blank text leaves the field unchanged. Token/password stay masked. Per-row feedback lasts three
+  seconds and contains only the trimmed count or `clipboard is empty`. Compose `LocalClipboard`
+  supplies the platform bridge because the tool plugin forbids `LocalContext`; no SDK policy change.
 
 ## Thread rendering (M0 read-only)
 
