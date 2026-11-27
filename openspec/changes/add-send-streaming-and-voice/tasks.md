@@ -82,3 +82,10 @@ the wheel to talk — as long as you like, because dictation is chunked and stit
 - [x] 9.2 Audit every session-id path (`messages`, `messages/around`, `latest-descendant`, `session.interrupt`, approval/clarify payloads) for URL-encoding of ids containing `/`.
 - [x] 9.3 Sessions screen: replace the stale "sending arrives in M1" subtitle with honest copy (`New session` with today's behavior), or wire `session.create` if the method is available and trivial.
 - [x] 9.4 Unit tests for the resolve-then-submit path (including one 4001 retry) and id encoding.
+
+## 10. M1.2 — resume for a runtime id (device blocker #2)
+
+- [ ] 10.1 When a thread opens (and before the first submit), call `session.resume {session_id, source: "desktop"}` and use the returned `session_id` as the runtime id for submit and for event correlation; cache it per stored id and refresh on 4001.
+- [ ] 10.2 Keep `latest-descendant` as the tip resolver (it returns the stored tip, not the runtime id) — document that order in the code: descendant → resume → submit.
+- [ ] 10.3 Log RPC failures (method, code, message — never tokens) at debug level so device failures are diagnosable from logcat.
+- [ ] 10.4 Unit tests: resume-then-submit happy path; 4001 → resume → retry; resume failure surfaces a specific error.
