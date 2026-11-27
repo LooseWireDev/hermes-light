@@ -30,7 +30,9 @@ sideload via the owner's tools).
 
 ## Standing constraints
 
-- Six screens maximum: Home (deck+thread), Sessions, Thread, Bots, Approvals-inline, Setup.
+- Seven screens maximum: Home (deck+thread), **Menu**, Sessions, Thread, Bots, Approvals-inline, Setup.
+  The menu is a full page in Light row style, not a drawer (owner decision, supersedes the
+  wheel-the-whole-thread shortcut).
 - Admin surfaces (kanban board, files, MCP, skills, logs, config editors) are out of scope forever;
   they live on the desktop client and in the Hermes Mobile fork.
 - Never auto-approve; never fabricate `done`.

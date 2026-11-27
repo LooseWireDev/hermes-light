@@ -43,4 +43,4 @@ keyboard are additive, never required.
 #### Scenario: Wheel-only journey
 
 - **WHEN** a user starts at Home with no session open
-- **THEN** wheel-up opens Sessions, click opens a session, back returns to Sessions, back returns to Home — and every step shows the same status line
+- **THEN** the menu action (or wheel-up past the deck) opens the Menu page, History opens Sessions, click opens a session, and Back walks Thread → Sessions → Menu → Home — every step showing the same status line
