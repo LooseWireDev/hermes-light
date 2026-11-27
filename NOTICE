@@ -1,0 +1,10 @@
+Hermes Light
+Copyright 2026 LooseWireDev
+
+Dashboard protocol handling is derived from the contract and implementation of
+Hermes Mobile (https://github.com/Hy4ri/hermes-mobile), licensed under the
+Apache License, Version 2.0. Original attribution is retained in derived source.
+The Apache-2.0 license is included in LICENSES/Apache-2.0.txt.
+
+Light SDK and its dependencies retain their respective licenses.
+BrightHermes patterns are reused with the owner's permission.
