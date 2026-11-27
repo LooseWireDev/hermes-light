@@ -130,3 +130,18 @@ tool can take the wheel itself.
 - [ ] 12.2 Menu page: status block (connected + model + session count), rows History / Bots / Cron / Settings / About, each with a live count where one exists (`Cron · 0 jobs`), Light row style.
 - [ ] 12.3 Menu lists the three most recent sessions below the rows; each opens its thread; Back walks Thread → Sessions → Menu → Home.
 - [ ] 12.4 Version bump to 0.2.1 (code 105) and gates green.
+
+## 13. Voice engine (owner report: "there is no voice engine")
+
+Facts: LightOS ships **no system speech recognizer**; BrightHermes transcribes on-device with
+sherpa-onnx + NVIDIA Parakeet TDT 110M int8 (`app/libs/sherpa-onnx-1.13.6-arm64.aar`, ~120 MB model
+fetched at build). Our M1 run ported only `DictationTake` (the stitcher) — **no capture, no engine**
+exists, so a hold has nothing to run. The dashboard also exposes `POST /api/audio/transcribe`
+`{data_url, mime_type}` (base64 audio in, `{transcript}` out) — the desktop client's voice path.
+
+- [ ] 13.1 `voice/Listener.kt`: AudioRecord (VOICE_RECOGNITION, 16 kHz mono, PCM16), windowed capture driven by `DictationTake`, states Listening / Transcribing / NoSpeech / Error, and a single commit point on release.
+- [ ] 13.2 Transcription via the dashboard: each window → WAV → base64 data URL → `POST api/audio/transcribe` with the session's auth → transcript; stitch windows with the existing anchor logic. Empty transcript is NoSpeech, not an error.
+- [ ] 13.3 Honest states in the UI: `listening` while held, `transcribing…` after release, then the text lands in the composer (not auto-send unless the release gesture says send) — and `no speech` when the server returns nothing.
+- [ ] 13.4 No network → specific line ("transcription needs the dashboard"), take discarded, nothing sent.
+- [ ] 13.5 Unit tests: WAV header correctness for 16 kHz mono PCM16, base64 data URL shape, window stitching through DictationTake with 3 overlapping windows, empty-transcript → NoSpeech.
+- [ ] 13.6 Leave on-device sherpa as a future option (offline/latency) documented in design.md, with the arm64 + ~120 MB cost written down rather than discovered.

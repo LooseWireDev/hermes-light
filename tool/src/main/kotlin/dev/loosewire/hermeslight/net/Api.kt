@@ -26,6 +26,13 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.io.IOException
 
+@Serializable
+data class CronJobSummary(
+    val id: String,
+    val name: String,
+    val state: String? = null,
+)
+
 enum class ApiErrorKind {
     UNAUTHORIZED,
     HTTP,
@@ -56,6 +63,13 @@ class Api(
     private val json: Json = hermesJson,
     private val tokenProvider: () -> String? = { null },
 ) {
+    /** Read-only menu snapshot; zero is shown only after a successful jobs response. */
+    suspend fun cronJobs(
+        endpoint: Endpoint,
+        profile: String? = null,
+    ): List<CronJobSummary> =
+        decode(getJson(endpoint, emptyList(), mapOf("profile" to profile), basePath = "api/cron/jobs"))
+
     suspend fun sessions(
         endpoint: Endpoint,
         limit: Int = DEFAULT_PAGE_SIZE,
@@ -261,8 +275,9 @@ class Api(
         endpoint: Endpoint,
         path: List<String>,
         query: Map<String, String?>,
+        basePath: String = "api/sessions",
     ): String {
-        val builderUrl = endpoint.buildUrl("api/sessions", query).newBuilder()
+        val builderUrl = endpoint.buildUrl(basePath, query).newBuilder()
         path.forEach { builderUrl.addPathSegment(it) }
         val url = builderUrl.build().toString()
         val builder =

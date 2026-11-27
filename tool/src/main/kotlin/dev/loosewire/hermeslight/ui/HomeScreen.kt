@@ -15,6 +15,7 @@ import androidx.compose.ui.Modifier
 import com.thelightphone.sdk.ui.LightBarButton
 import com.thelightphone.sdk.ui.LightThemeTokens
 import com.thelightphone.sdk.ui.LightTopBar
+import com.thelightphone.sdk.ui.LightTopBarCenter
 import com.thelightphone.sdk.ui.gridUnitsAsDp
 import dev.loosewire.hermeslight.ui.common.StatusLine
 import dev.loosewire.hermeslight.ui.common.ThreadView
@@ -22,7 +23,7 @@ import dev.loosewire.hermeslight.ui.common.WheelScroll
 import dev.loosewire.hermeslight.ui.common.rememberThreadReader
 
 /**
- * Home: History/Bots actions, conditional attention strip, transcript and connection status.
+ * Home: a single Menu action, conditional attention strip, transcript and connection status.
  * The thread's position and older/newer callbacks are shared with the full Thread screen.
  */
 @Composable
@@ -42,12 +43,12 @@ fun HomeScreen(
             onAction = actions.threadActions.onAction,
         )
     var focus by remember(thread.sessionId) {
-        mutableStateOf(if (thread.messages.isEmpty()) HomeWheelFocus.History else HomeWheelFocus.Thread)
+        mutableStateOf(if (thread.messages.isEmpty()) HomeWheelFocus.Menu else HomeWheelFocus.Thread)
     }
     val wheelFocus =
-        if (focus == HomeWheelFocus.Status && state.statusStrip == null) HomeWheelFocus.History else focus
+        if (focus == HomeWheelFocus.Status && state.statusStrip == null) HomeWheelFocus.Menu else focus
     LaunchedEffect(state.statusStrip == null) {
-        if (state.statusStrip == null && focus == HomeWheelFocus.Status) focus = HomeWheelFocus.History
+        if (state.statusStrip == null && focus == HomeWheelFocus.Status) focus = HomeWheelFocus.Menu
     }
 
     WheelScroll(
@@ -74,8 +75,7 @@ fun HomeScreen(
         onClick = {
             when (wheelFocus) {
                 HomeWheelFocus.Thread -> reader.activate()
-                HomeWheelFocus.History -> actions.onOpenHistory()
-                HomeWheelFocus.Bots -> actions.onOpenBots()
+                HomeWheelFocus.Menu -> actions.onOpenMenu()
                 HomeWheelFocus.Status -> state.statusStrip?.let { actions.onOpenStatus(it.sessionId) }
             }
         },
@@ -91,13 +91,12 @@ fun HomeScreen(
             LightTopBar(
                 leftButton =
                     LightBarButton.Text(
-                        if (wheelFocus == HomeWheelFocus.History) "› History" else "History",
-                        onClick = actions.onOpenHistory,
+                        if (wheelFocus == HomeWheelFocus.Menu) "› Menu" else "Menu",
+                        onClick = actions.onOpenMenu,
                     ),
-                rightButton =
-                    LightBarButton.Text(
-                        if (wheelFocus == HomeWheelFocus.Bots) "› Bots" else "Bots",
-                        onClick = actions.onOpenBots,
+                center =
+                    LightTopBarCenter.Text(
+                        thread.title.ifBlank { thread.botName.ifBlank { "Hermes" } },
                     ),
             )
             HomeStatusStrip(

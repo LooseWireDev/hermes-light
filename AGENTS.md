@@ -42,7 +42,7 @@ export JAVA_HOME=$HOME/.local/opt/temurin21        # JVM 21 for all tool variant
   standard development password `android` (not a release key). Override the path with
   `-Phermes.signingStore=/path/to/hermes-light-dev.jks`. Never commit or upload this key.
 - SDK generates the manifest and Android activity; `MainActivity` is the `@InitialScreen`
-  `SimpleLightScreen` receiving a `SealedLightActivity`, not an Android activity subclass.
+  `LightScreen` receiving a `SealedLightActivity`, not an Android activity subclass.
 
 The SDK's `LightTextInputEditor` uses Compose `TextFieldState` and its embedded LP3 keyboard:
 no platform `EditText`, long-press paste, keyboard paste key, or password-manager autofill surface.
@@ -60,6 +60,12 @@ contains only the trimmed character count, never clipboard contents.
   commit).
 - Live gateway for manual testing: the owner's dashboard over Tailscale, or a loopback dashboard on
   the host reached via `adb reverse tcp:9121 tcp:9121` (token auto-extraction, no credentials).
+
+- BrightControl (`com.gios.lightcontrol`): its per-app rule for `dev.loosewire.hermeslight`
+  must be **Off / hands-off**, or wheel clicks and camera presses may never reach the app.
+  `com.thelightphone.*` and `com.gios.*` are hands-off by default; our package is not.
+  Long-press the Thread status line for click/turn counts, microphone grant and BrightControl
+  detection. An SDK key handler cannot recover a key swallowed upstream.
 
 ## Workflow
 

@@ -47,8 +47,7 @@ data class HomeActions(
     val onOpenStatus: (String?) -> Unit = {},
     /** Opens the full Thread at a message id, or at the newest message when null. */
     val onOpenThread: (String?) -> Unit = {},
-    val onOpenHistory: () -> Unit = {},
-    val onOpenBots: () -> Unit = {},
+    val onOpenMenu: () -> Unit = {},
     /** Home and the full Thread share the same read position and older paging. */
     val threadActions: ThreadActions = ThreadActions(),
     val onBack: () -> Unit = {},
@@ -163,6 +162,8 @@ data class ThreadUi(
     val status: StatusLineModel = StatusLineModel(""),
     val composer: String = "",
     val running: Boolean = false,
+    val voiceFeedback: String? = null,
+    val wheelDiagnostics: String? = null,
 )
 
 data class ThreadActions(
@@ -174,6 +175,10 @@ data class ThreadActions(
     val onDraftChange: (String) -> Unit = {},
     val onSubmit: (String) -> Unit = {},
     val onAction: (String) -> Unit = {},
+    val onHoldStart: () -> Unit = {},
+    val onHoldEnd: () -> Unit = {},
+    val onHoldCancel: () -> Unit = {},
+    val onDiagnostics: () -> Unit = {},
 )
 
 // -- Bots -----------------------------------------------------------------------------------------

@@ -14,6 +14,7 @@ import com.thelightphone.sdk.ui.LightThemeTokens
 import com.thelightphone.sdk.ui.LightTopBar
 import com.thelightphone.sdk.ui.LightTopBarCenter
 import com.thelightphone.sdk.ui.gridUnitsAsDp
+import com.thelightphone.sdk.ui.lightTapAndLongPress
 import com.thelightphone.sdk.ui.verticalGridUnitsAsDp
 import dev.loosewire.hermeslight.ui.common.HintLine
 import dev.loosewire.hermeslight.ui.common.StatusLine
@@ -67,9 +68,20 @@ fun ThreadScreen(
                 actions.onLoadNewer()
             }
         },
-        onClick = { reader.activate() },
+        onClick = {
+            val action = reader.focusedMessage()?.action
+            when {
+                action?.startsWith("approval:") == true || action?.startsWith("clarify:") == true -> reader.activate()
+                state.running -> actions.onAction("stop")
+                state.composer.isNotBlank() -> actions.onSubmit(state.composer)
+                else -> reader.activate()
+            }
+        },
         onBack = actions.onBack,
         onLongBack = actions.onLongBack,
+        onHoldStart = actions.onHoldStart,
+        onHoldEnd = actions.onHoldEnd,
+        onHoldCancel = actions.onHoldCancel,
     ) {
         Column(
             modifier =
@@ -89,7 +101,17 @@ fun ThreadScreen(
                     ),
                 modifier = Modifier.padding(bottom = 0.4f.verticalGridUnitsAsDp()),
             )
-            StatusLine(status = state.status)
+            StatusLine(
+                status = state.status,
+                modifier =
+                    Modifier.lightTapAndLongPress(
+                        onTap = {},
+                        onLongPress = actions.onDiagnostics,
+                        onLongClickLabel = "Wheel diagnostics",
+                    ),
+            )
+            state.voiceFeedback?.let { HintLine(it) }
+            state.wheelDiagnostics?.let { HintLine(it) }
 
             when {
                 state.loading && state.messages.isEmpty() -> HintLine("loading transcript…")

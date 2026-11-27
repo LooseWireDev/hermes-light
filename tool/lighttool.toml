@@ -1,9 +1,9 @@
 [tool]
 id = "dev.loosewire.hermeslight"
 label = "Hermes Light"
-versionCode = 104
-versionName = "0.2.0"
+versionCode = 105
+versionName = "0.2.1"
 permissions = ["android.permission.INTERNET", "android.permission.RECORD_AUDIO"]
-capabilities = ["cleartext-http"]
+capabilities = ["cleartext-http", "app-access"]
 serverPackage = "com.lightos"
 orientation = "portrait"

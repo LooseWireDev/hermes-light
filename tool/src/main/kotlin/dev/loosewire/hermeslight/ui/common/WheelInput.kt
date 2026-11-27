@@ -7,7 +7,10 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Modifier
@@ -15,6 +18,34 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import com.thelightphone.lp3Keyboard.ui.LightDeviceKeys
+import dev.loosewire.hermeslight.hw.ThreadWheelViewModel
+
+/** One SDK-owned handler, shared by native delivery and the Compose preview path. */
+internal val LocalScreenWheel = compositionLocalOf<ThreadWheelViewModel?> { null }
+
+@Composable
+internal fun BindScreenWheel(
+    onClick: () -> Unit,
+    onUp: () -> Unit = {},
+    onDown: () -> Unit = {},
+    onHoldStart: (() -> Unit)? = null,
+    onHoldEnd: (() -> Unit)? = null,
+    onHoldCancel: (() -> Unit)? = null,
+) {
+    val wheel = LocalScreenWheel.current
+    SideEffect {
+        wheel?.bind(
+            onClick = onClick,
+            onHoldStart = onHoldStart,
+            onHoldEnd = onHoldEnd,
+            onHoldCancel = onHoldCancel,
+            onTurn = { steps -> if (steps > 0) onUp() else onDown() },
+        )
+    }
+    DisposableEffect(wheel) {
+        onDispose { wheel?.unbind() }
+    }
+}
 
 private const val LONG_BACK_MS = 700L
 
@@ -56,8 +87,13 @@ fun WheelScroll(
     onBack: () -> Unit,
     onLongBack: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
+    onHoldStart: (() -> Unit)? = null,
+    onHoldEnd: (() -> Unit)? = null,
+    onHoldCancel: (() -> Unit)? = null,
     content: @Composable BoxScope.() -> Unit,
 ) {
+    val wheel = LocalScreenWheel.current
+    BindScreenWheel(onClick, onUp, onDown, onHoldStart, onHoldEnd, onHoldCancel)
     val up = rememberUpdatedState(onUp)
     val down = rememberUpdatedState(onDown)
     val click = rememberUpdatedState(onClick)
@@ -79,6 +115,7 @@ fun WheelScroll(
                     val native = event.nativeKeyEvent
                     val keyCode = native.keyCode
                     when {
+                        wheel?.dispatch(native) == true -> true
                         isUpKey(keyCode) -> {
                             if (native.action == KeyEvent.ACTION_DOWN && native.repeatCount == 0) {
                                 up.value()

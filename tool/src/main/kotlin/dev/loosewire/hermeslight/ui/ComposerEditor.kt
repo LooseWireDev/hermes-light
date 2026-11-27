@@ -11,6 +11,7 @@ import androidx.compose.ui.Modifier
 import com.thelightphone.sdk.rememberKeyboardOptions
 import com.thelightphone.sdk.ui.LightTextInputEditor
 import com.thelightphone.sdk.ui.LightThemeTokens
+import dev.loosewire.hermeslight.ui.common.BindScreenWheel
 import dev.loosewire.hermeslight.ui.common.consumeBackKey
 
 /** Uses the SDK keyboard in the current screen; leaving the editor preserves the draft. */
@@ -26,6 +27,16 @@ fun ComposerEditor(
     DisposableEffect(Unit) {
         onDispose { if (!submitted[0]) actions.onDraftChange(text.text.toString()) }
     }
+    BindScreenWheel(
+        onClick = {
+            submitted[0] = true
+            actions.onSubmit(text.text.toString())
+            onClose()
+        },
+        onHoldStart = actions.onHoldStart,
+        onHoldEnd = actions.onHoldEnd,
+        onHoldCancel = actions.onHoldCancel,
+    )
     Box(
         Modifier
             .fillMaxSize()

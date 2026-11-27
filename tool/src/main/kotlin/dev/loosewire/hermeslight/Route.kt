@@ -4,10 +4,11 @@ internal enum class Route(
     val parent: Route? = null,
 ) {
     Home,
-    Sessions(Home),
+    Menu(Home),
+    Sessions(Menu),
     Thread(Sessions),
-    Bots(Home),
-    Setup(Home),
+    Bots(Menu),
+    Setup(Menu),
 }
 
 /** Use the SDK stack, including missing parents when opening a thread directly from Home. */

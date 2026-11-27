@@ -30,9 +30,10 @@ sideload via the owner's tools).
 
 ## Standing constraints
 
-- Five screens maximum: Home (conditional strip + thread), Sessions, Thread, Bots, Approvals-inline, Setup.
-  No menu page, no drawer, no tab bar (owner decision after alpha2). A page whose content fills under
-  half the viewport does not ship.
+- Six screens maximum: Home (conditional strip + thread), Menu (status + destinations + recents),
+  Sessions, Thread, Bots, Setup; approvals stay inline. Menu v2 supersedes the alpha2 no-menu
+  decision. Cron and About expand within Menu; no drawer or tabs. Back: Thread → Sessions → Menu →
+  Home. A page whose content fills under half the viewport does not ship.
 - Admin surfaces (kanban board, files, MCP, skills, logs, config editors) are out of scope forever;
   they live on the desktop client and in the Hermes Mobile fork.
 - Never auto-approve; never fabricate `done`.

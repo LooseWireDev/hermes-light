@@ -16,6 +16,38 @@ import kotlin.test.assertTrue
 
 class ApiTest {
     @Test
+    fun `cron menu snapshot preserves proxy prefix profile and authentication`() =
+        runBlocking {
+            TestHttpServer { exchange ->
+                assertEquals("/dash/api/cron/jobs", exchange.requestURI.path)
+                assertEquals("Bearer menu-token", exchange.requestHeaders.getFirst("Authorization"))
+                assertEquals("june", queryParameters(exchange.requestURI)["profile"])
+                exchange.respondJson(200, """[{"id":"job-1","name":"Morning","state":"paused","extra":true}]""")
+            }.use { server ->
+                val api = Api(tokenProvider = { "menu-token" })
+                assertEquals(
+                    listOf(CronJobSummary("job-1", "Morning", "paused")),
+                    api.cronJobs(Endpoint.parse("${server.baseUrl}/dash"), "june"),
+                )
+            }
+        }
+
+    @Test
+    fun `cron menu snapshot distinguishes no jobs from unavailable jobs`() =
+        runBlocking {
+            var status = 200
+            TestHttpServer { exchange ->
+                exchange.respondJson(status, "[]")
+            }.use { server ->
+                val api = Api()
+                val endpoint = Endpoint.parse(server.baseUrl)
+                assertEquals(emptyList(), api.cronJobs(endpoint))
+                status = 503
+                assertEquals(503, assertFailsWith<ApiException> { api.cronJobs(endpoint) }.httpCode)
+            }
+        }
+
+    @Test
     fun `session ids are single encoded path segments for every REST operation`() =
         runBlocking {
             val paths = Collections.synchronizedList(mutableListOf<String>())

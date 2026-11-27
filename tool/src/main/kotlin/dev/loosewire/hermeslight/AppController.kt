@@ -69,6 +69,12 @@ internal data class AppState(
     val sessionsLoading: Boolean = false,
     val sessionsHaveMore: Boolean = false,
     val bots: List<BotSource> = emptyList(),
+    val menuSessions: List<SessionSummary> = emptyList(),
+    val menuSessionCount: Int? = null,
+    val menuCronCount: Int? = null,
+    val menuCronSummary: String = "Loading jobs…",
+    val menuError: String? = null,
+    val botsLoaded: Boolean = false,
     val botsLoading: Boolean = false,
     val selectedBot: String? = null,
     val selectedSession: String? = null,
@@ -99,6 +105,8 @@ internal class AppController(
     private var sessionsJob: Job? = null
     private var threadJob: Job? = null
     private var botsJob: Job? = null
+    private var menuJob: Job? = null
+    private var menuVisible = false
     private var positionSaveJob: Job? = null
     private var sessionsOffset = 0
     private var connectionEpoch = 0
@@ -189,6 +197,7 @@ internal class AppController(
         sessionsJob?.cancel()
         threadJob?.cancel()
         botsJob?.cancel()
+        menuJob?.cancel()
         refreshJobs.values.forEach { it.cancel() }
         refreshJobs.clear()
         attentionJob?.cancel()
@@ -215,6 +224,7 @@ internal class AppController(
         sessionsJob?.cancel()
         threadJob?.cancel()
         botsJob?.cancel()
+        menuJob?.cancel()
         mutable.update { it.copy(sessionsLoading = false, threadLoading = false, botsLoading = false) }
         connectionJob =
             scope.launch {
@@ -335,6 +345,12 @@ internal class AppController(
                         endpoint = authenticated.endpoint,
                         selectedBot = authenticated.botProfile,
                         selectedSession = authenticated.selectedSessionId,
+                        menuSessions = if (persist) emptyList() else it.menuSessions,
+                        menuSessionCount = if (persist) null else it.menuSessionCount,
+                        menuCronCount = if (persist) null else it.menuCronCount,
+                        menuCronSummary = if (persist) "Loading jobs…" else it.menuCronSummary,
+                        menuError = null,
+                        botsLoaded = if (persist) false else it.botsLoaded,
                         sessions = if (persist) emptyList() else it.sessions,
                         messages = if (persist) emptyList() else it.messages,
                         desktopNotices = if (persist) emptyMap() else it.desktopNotices,
@@ -363,6 +379,57 @@ internal class AppController(
                 mutable.update { it.copy(connecting = false) }
             }
         }
+    }
+
+    fun menuShown() {
+        menuVisible = true
+        loadMenu()
+        loadBots()
+    }
+
+    fun menuHidden() {
+        menuVisible = false
+    }
+
+    private fun loadMenu() {
+        val saved = profile ?: return
+        val epoch = connectionEpoch
+        menuJob?.cancel()
+        menuJob =
+            scope.launch {
+                mutable.update { it.copy(menuError = null) }
+                val endpoint = Endpoint.parse(saved.endpoint)
+                try {
+                    val page = api.sessions(endpoint, limit = 3)
+                    if (epoch != connectionEpoch) return@launch
+                    mutable.update { it.copy(menuSessions = page.sessions, menuSessionCount = page.total) }
+                } catch (error: CancellationException) {
+                    throw error
+                } catch (error: Exception) {
+                    mutable.update { it.copy(menuError = error.message ?: "Sessions unavailable") }
+                }
+                try {
+                    val jobs = api.cronJobs(endpoint, selectedProfile(saved))
+                    if (epoch != connectionEpoch) return@launch
+                    mutable.update {
+                        it.copy(
+                            menuCronCount = jobs.size,
+                            menuCronSummary =
+                                if (jobs.isEmpty()) {
+                                    "No scheduled jobs. Create and manage jobs on the desktop."
+                                } else {
+                                    jobs.joinToString("\n") { job ->
+                                        job.name + (job.state?.let { state -> " · $state" } ?: "")
+                                    }
+                                },
+                        )
+                    }
+                } catch (error: CancellationException) {
+                    throw error
+                } catch (error: Exception) {
+                    mutable.update { it.copy(menuCronCount = null, menuCronSummary = error.message ?: "Jobs unavailable") }
+                }
+            }
     }
 
     fun loadSessions(reset: Boolean = false) {
@@ -554,6 +621,7 @@ internal class AppController(
                         mutable.update { it.copy(bots = counts.values.toList()) }
                         offset += page.sessions.size
                     } while (page.hasMore && page.sessions.isNotEmpty())
+                    mutable.update { it.copy(botsLoaded = true) }
                 } catch (error: CancellationException) {
                     throw error
                 } catch (error: Exception) {
@@ -998,6 +1066,10 @@ internal class AppController(
 
     private fun receive(event: GatewayEvent) {
         val session = event.sessionId?.let(::storedId)
+        if (menuVisible && event is GatewayEvent.Change) {
+            if (event.type == "cron.changed" || event.type == "sessions.changed") loadMenu()
+            if (event.type == "sessions.changed") loadBots()
+        }
         session?.let { eventRevisions[it] = (eventRevisions[it] ?: 0L) + 1 }
         mutable.update { reduceGatewayEvent(it, event, session) }
         if ((event is GatewayEvent.Done || event is GatewayEvent.MessageDone || event is GatewayEvent.Failure) &&

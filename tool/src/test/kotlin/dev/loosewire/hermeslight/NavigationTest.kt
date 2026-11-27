@@ -7,20 +7,23 @@ class NavigationTest {
     @Test
     fun `history opens a thread with exactly one parent per back press`() {
         val stack = mutableListOf(Route.Home)
+        stack.open(Route.Menu)
         stack.open(Route.Sessions)
         stack.open(Route.Thread)
-        assertEquals(listOf(Route.Home, Route.Sessions, Route.Thread), stack)
+        assertEquals(listOf(Route.Home, Route.Menu, Route.Sessions, Route.Thread), stack)
         stack.removeAt(stack.lastIndex)
         assertEquals(Route.Sessions, stack.last())
+        stack.removeAt(stack.lastIndex)
+        assertEquals(Route.Menu, stack.last())
         stack.removeAt(stack.lastIndex)
         assertEquals(listOf(Route.Home), stack)
     }
 
     @Test
-    fun `direct Home thread activation includes history in the SDK stack`() {
+    fun `direct Home thread activation includes menu and history in the SDK stack`() {
         val stack = mutableListOf(Route.Home)
         stack.open(Route.Thread)
-        assertEquals(listOf(Route.Home, Route.Sessions, Route.Thread), stack)
+        assertEquals(listOf(Route.Home, Route.Menu, Route.Sessions, Route.Thread), stack)
     }
 
     @Test
@@ -34,10 +37,25 @@ class NavigationTest {
     fun `bot selection opens filtered history with the same back chain`() {
         val stack = mutableListOf(Route.Home)
         stack.open(Route.Bots)
-        assertEquals(listOf(Route.Home, Route.Bots), stack)
+        assertEquals(listOf(Route.Home, Route.Menu, Route.Bots), stack)
         stack.open(Route.Sessions)
+        assertEquals(listOf(Route.Home, Route.Menu, Route.Sessions), stack)
         stack.open(Route.Thread)
-        assertEquals(listOf(Route.Home, Route.Sessions, Route.Thread), stack)
+        assertEquals(listOf(Route.Home, Route.Menu, Route.Sessions, Route.Thread), stack)
+    }
+
+    @Test
+    fun `recent thread from the Menu uses the full thread-session-menu-home chain`() {
+        val stack = mutableListOf(Route.Home)
+        stack.open(Route.Menu)
+        stack.open(Route.Thread)
+        assertEquals(listOf(Route.Home, Route.Menu, Route.Sessions, Route.Thread), stack)
+        stack.removeAt(stack.lastIndex)
+        assertEquals(Route.Sessions, stack.last())
+        stack.removeAt(stack.lastIndex)
+        assertEquals(Route.Menu, stack.last())
+        stack.removeAt(stack.lastIndex)
+        assertEquals(listOf(Route.Home), stack)
     }
 
     @Test
