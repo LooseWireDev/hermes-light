@@ -32,30 +32,23 @@ data class ListPosition(
 
 // -- Home -----------------------------------------------------------------------------------------
 
-data class DeckTileUi(
-    val id: String,
-    val label: String,
-    val value: String,
-    val detail: String? = null,
-    val actionable: Boolean = true,
-)
-
-data class DeckUi(
-    /** M0 always supplies an empty list; the placeholder line is rendered instead. */
-    val tiles: List<DeckTileUi> = emptyList(),
-    val emptyText: String = "Tiles arrive with live data.",
+data class StatusStripUi(
+    val summary: String,
+    /** Null opens the current thread, which also displays unscoped dashboard notices. */
+    val sessionId: String?,
 )
 
 data class HomeUi(
-    val deck: DeckUi = DeckUi(),
+    val statusStrip: StatusStripUi? = null,
     val thread: ThreadUi,
 )
 
 data class HomeActions(
-    val onOpenDeckTile: (String) -> Unit = {},
+    val onOpenStatus: (String?) -> Unit = {},
     /** Opens the full Thread at a message id, or at the newest message when null. */
     val onOpenThread: (String?) -> Unit = {},
-    val onOpenMenu: () -> Unit = {},
+    val onOpenHistory: () -> Unit = {},
+    val onOpenBots: () -> Unit = {},
     /** Home and the full Thread share the same read position and older paging. */
     val threadActions: ThreadActions = ThreadActions(),
     val onBack: () -> Unit = {},

@@ -27,7 +27,6 @@ import dev.loosewire.hermeslight.ui.HomeActions
 import dev.loosewire.hermeslight.ui.HomeScreen
 import dev.loosewire.hermeslight.ui.HomeUi
 import dev.loosewire.hermeslight.ui.ListPosition
-import dev.loosewire.hermeslight.ui.MenuScreen
 import dev.loosewire.hermeslight.ui.ProviderUi
 import dev.loosewire.hermeslight.ui.SessionsActions
 import dev.loosewire.hermeslight.ui.SessionsScreen
@@ -132,7 +131,7 @@ private fun SimpleLightScreen<Unit>.Surface(
             route == Route.Setup || !state.configured -> SetupForm(state, controller, back)
             route == Route.Home ->
                 HomeScreen(
-                    HomeUi(thread = state.threadUi()),
+                    HomeUi(statusStrip = state.statusStripUi(), thread = state.threadUi()),
                     HomeActions(
                         onOpenThread = {
                             if (state.selectedSession == null) {
@@ -141,17 +140,16 @@ private fun SimpleLightScreen<Unit>.Surface(
                                 open(controller, route, Route.Thread)
                             }
                         },
-                        onOpenMenu = { open(controller, route, Route.Menu) },
+                        onOpenStatus = { session ->
+                            if (session != null) controller.openSession(session)
+                            open(controller, route, Route.Thread)
+                        },
+                        onOpenHistory = { open(controller, route, Route.Sessions) },
+                        onOpenBots = { open(controller, route, Route.Bots) },
                         onBack = back,
                         onLongBack = setup,
                         threadActions = threadActions,
                     ),
-                )
-            route == Route.Menu ->
-                MenuScreen(
-                    status = state.statusUi(),
-                    onOpen = { open(controller, route, it) },
-                    onBack = back,
                 )
             route == Route.Sessions ->
                 SessionsScreen(

@@ -24,6 +24,12 @@ menu page, drawer, sheet, or tab bar for navigation.
 - **WHEN** the user opens Sessions and presses Back
 - **THEN** they return to Home directly (no intermediate menu page)
 
+#### Scenario: Wheel-only access without crossing the oldest thread boundary
+
+- **WHEN** the user turns down past the newest message on Home
+- **THEN** focus moves through History, Bots and the status strip if present, then returns to the thread; click activates the focused action
+- **AND** empty Home starts at History, absent content is skipped, and turning up at the thread's oldest boundary never transfers focus
+
 ### Requirement: No half-empty screens
 
 A full screen whose content occupies under half of the viewport SHALL be folded into an existing

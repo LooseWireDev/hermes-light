@@ -2,6 +2,7 @@ package dev.loosewire.hermeslight
 
 import dev.loosewire.hermeslight.ui.SessionRowUi
 import dev.loosewire.hermeslight.ui.StatusLineModel
+import dev.loosewire.hermeslight.ui.StatusStripUi
 import dev.loosewire.hermeslight.ui.StatusTone
 import dev.loosewire.hermeslight.ui.ThreadMessageKind
 import dev.loosewire.hermeslight.ui.ThreadMessageUi
@@ -24,6 +25,47 @@ internal fun AppState.statusUi(): StatusLineModel =
             else -> StatusTone.Idle
         },
     )
+
+/** Pending approvals win over running turns, even when their session is not currently selected. */
+internal fun AppState.statusStripUi(): StatusStripUi? {
+    var approvals = 0
+    var clarifications = 0
+    var approvalSession: String? = null
+    var clarificationSession: String? = null
+    for ((session, notices) in desktopNotices) {
+        for (notice in notices) {
+            if (notice.clarification) {
+                if (clarifications == 0) clarificationSession = session
+                clarifications++
+            } else {
+                if (approvals == 0) approvalSession = session
+                approvals++
+            }
+        }
+    }
+    if (approvals == 0 && clarifications == 0 && liveSessions.isEmpty()) return null
+    val summary =
+        buildString {
+            if (approvals > 0) {
+                append(approvals).append(if (approvals == 1) " approval" else " approvals")
+            }
+            if (clarifications > 0) {
+                if (isNotEmpty()) append(" · ")
+                append(clarifications).append(if (clarifications == 1) " clarification" else " clarifications")
+            }
+            if (liveSessions.isNotEmpty()) {
+                if (isNotEmpty()) append(" · ")
+                append(liveSessions.size).append(" running")
+            }
+        }
+    val session =
+        when {
+            approvals > 0 -> approvalSession
+            clarifications > 0 -> clarificationSession
+            else -> liveSessions.first()
+        }
+    return StatusStripUi(summary, session?.takeUnless { it == GLOBAL_NOTICE })
+}
 
 internal fun AppState.sessionRows(now: Long): List<SessionRowUi> =
     sessions.map { session ->
@@ -118,7 +160,7 @@ internal fun AppState.threadUi(): ThreadUi {
         loading = threadLoading && messages.isEmpty(),
         loadingOlder = threadLoading && messages.isNotEmpty(),
         error = operationError,
-        emptyText = if (selectedSession == null) "Turn up to choose a session." else "No messages yet.",
+        emptyText = if (selectedSession == null) "Use History to choose a session." else "No messages yet.",
         status = statusUi(),
     )
 }

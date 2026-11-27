@@ -2,45 +2,27 @@ package dev.loosewire.hermeslight.ui
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.text.style.TextOverflow
 import com.thelightphone.sdk.ui.LightBarButton
-import com.thelightphone.sdk.ui.LightText
-import com.thelightphone.sdk.ui.LightTextVariant
 import com.thelightphone.sdk.ui.LightThemeTokens
 import com.thelightphone.sdk.ui.LightTopBar
 import com.thelightphone.sdk.ui.gridUnitsAsDp
-import com.thelightphone.sdk.ui.verticalGridUnitsAsDp
-import dev.loosewire.hermeslight.ui.common.FocusRow
-import dev.loosewire.hermeslight.ui.common.SectionLabel
 import dev.loosewire.hermeslight.ui.common.StatusLine
-import dev.loosewire.hermeslight.ui.common.ThreadNotices
 import dev.loosewire.hermeslight.ui.common.ThreadView
 import dev.loosewire.hermeslight.ui.common.WheelScroll
 import dev.loosewire.hermeslight.ui.common.rememberThreadReader
 
-private enum class HomeZone {
-    Deck,
-    Thread,
-}
-
 /**
- * Home: Menu action, deck on top, transcript below, one status line.
- *
- * Wheel contract here: the thread's top crosses into the deck's bottom; the deck's top opens
- * Menu. With no messages, the deck is the initial zone, so one wheel-up reaches Menu.
+ * Home: History/Bots actions, conditional attention strip, transcript and connection status.
  * The thread's position and older/newer callbacks are shared with the full Thread screen.
  */
 @Composable
@@ -58,70 +40,42 @@ fun HomeScreen(
             onPositionChanged = actions.threadActions.onPositionChanged,
             onActivate = { message -> actions.onOpenThread(message.id) },
         )
-    var zone by remember(thread.sessionId) {
-        mutableStateOf(if (thread.messages.isEmpty()) HomeZone.Deck else HomeZone.Thread)
+    var focus by remember(thread.sessionId) {
+        mutableStateOf(if (thread.messages.isEmpty()) HomeWheelFocus.History else HomeWheelFocus.Thread)
     }
-    var deckIndex by remember(thread.sessionId, state.deck.tiles.size) { mutableIntStateOf(0) }
-    var interacted by remember(thread.sessionId) { mutableStateOf(false) }
-
-    LaunchedEffect(thread.sessionId, thread.messages.isNotEmpty()) {
-        if (!interacted && thread.messages.isNotEmpty()) {
-            reader.ensureFocus()
-            zone = HomeZone.Thread
-        }
-    }
-
-    fun enterDeck() {
-        deckIndex =
-            state.deck.tiles.lastIndex
-                .coerceAtLeast(0)
-        zone = HomeZone.Deck
+    val wheelFocus =
+        if (focus == HomeWheelFocus.Status && state.statusStrip == null) HomeWheelFocus.History else focus
+    LaunchedEffect(state.statusStrip == null) {
+        if (state.statusStrip == null && focus == HomeWheelFocus.Status) focus = HomeWheelFocus.History
     }
 
     WheelScroll(
         onUp = {
-            interacted = true
-            when (zone) {
-                HomeZone.Thread -> {
-                    if (!reader.moveUp()) enterDeck()
-                }
-
-                HomeZone.Deck -> {
-                    if (deckIndex > 0) {
-                        deckIndex--
-                    } else {
-                        actions.onOpenMenu()
-                    }
-                }
+            if (wheelFocus == HomeWheelFocus.Thread) {
+                if (!reader.moveUp() && thread.hasOlder) actions.threadActions.onLoadOlder()
+            } else {
+                focus = wheelFocus.previous(hasMessages = thread.messages.isNotEmpty())
             }
         },
         onDown = {
-            interacted = true
-            when (zone) {
-                HomeZone.Thread -> {
-                    if (!reader.moveDown() && thread.hasNewer) {
-                        actions.threadActions.onLoadNewer()
-                    }
-                }
-
-                HomeZone.Deck -> {
-                    if (deckIndex < state.deck.tiles.lastIndex) {
-                        deckIndex++
-                    } else if (thread.messages.isNotEmpty()) {
-                        reader.ensureFocus()
-                        zone = HomeZone.Thread
-                    }
+            if (wheelFocus != HomeWheelFocus.Thread || !reader.moveDown()) {
+                if (wheelFocus == HomeWheelFocus.Thread && thread.hasNewer) {
+                    actions.threadActions.onLoadNewer()
+                } else {
+                    focus =
+                        wheelFocus.next(
+                            hasMessages = thread.messages.isNotEmpty(),
+                            hasStatus = state.statusStrip != null,
+                        )
                 }
             }
         },
         onClick = {
-            interacted = true
-            when (zone) {
-                HomeZone.Thread -> reader.activate()
-                HomeZone.Deck -> {
-                    val tile = state.deck.tiles.getOrNull(deckIndex)
-                    if (tile != null && tile.actionable) actions.onOpenDeckTile(tile.id)
-                }
+            when (wheelFocus) {
+                HomeWheelFocus.Thread -> reader.activate()
+                HomeWheelFocus.History -> actions.onOpenHistory()
+                HomeWheelFocus.Bots -> actions.onOpenBots()
+                HomeWheelFocus.Status -> state.statusStrip?.let { actions.onOpenStatus(it.sessionId) }
             }
         },
         onBack = actions.onBack,
@@ -133,52 +87,22 @@ fun HomeScreen(
                     .fillMaxSize()
                     .background(colors.background),
         ) {
-            LightTopBar(leftButton = LightBarButton.Text("MENU", onClick = actions.onOpenMenu))
-            SectionLabel("Deck")
-            if (state.deck.tiles.isEmpty()) {
-                FocusRow(focused = zone == HomeZone.Deck) {
-                    LightText(
-                        text = state.deck.emptyText,
-                        variant = LightTextVariant.Paragraph,
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                }
-            } else {
-                state.deck.tiles.forEachIndexed { index, tile ->
-                    val focused = zone == HomeZone.Deck && deckIndex == index
-                    FocusRow(
-                        focused = focused,
-                        enabled = tile.actionable,
-                        onClick = { actions.onOpenDeckTile(tile.id) },
-                    ) {
-                        LightText(
-                            text = tile.label.uppercase(),
-                            variant = LightTextVariant.Superfine,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                        LightText(
-                            text = tile.value,
-                            variant = LightTextVariant.Copy,
-                            maxLines = 2,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                        tile.detail?.takeIf { it.isNotBlank() }?.let { detail ->
-                            LightText(
-                                text = detail,
-                                variant = LightTextVariant.Superfine,
-                                maxLines = 2,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                        }
-                    }
-                }
-            }
-
-            Spacer(Modifier.height(0.3f.verticalGridUnitsAsDp()))
-            ThreadNotices(
-                notices = thread.notices,
-                modifier = Modifier.padding(bottom = 0.2f.verticalGridUnitsAsDp()),
+            LightTopBar(
+                leftButton =
+                    LightBarButton.Text(
+                        if (wheelFocus == HomeWheelFocus.History) "› History" else "History",
+                        onClick = actions.onOpenHistory,
+                    ),
+                rightButton =
+                    LightBarButton.Text(
+                        if (wheelFocus == HomeWheelFocus.Bots) "› Bots" else "Bots",
+                        onClick = actions.onOpenBots,
+                    ),
+            )
+            HomeStatusStrip(
+                state.statusStrip,
+                focused = wheelFocus == HomeWheelFocus.Status,
+                onOpen = actions.onOpenStatus,
             )
             ThreadView(
                 messages = thread.messages,
@@ -190,7 +114,7 @@ fun HomeScreen(
                         .weight(1f)
                         .fillMaxWidth()
                         .padding(horizontal = 0.3f.gridUnitsAsDp()),
-                showFocus = zone == HomeZone.Thread,
+                showFocus = wheelFocus == HomeWheelFocus.Thread,
             )
             StatusLine(status = thread.status)
         }

@@ -4,11 +4,10 @@ internal enum class Route(
     val parent: Route? = null,
 ) {
     Home,
-    Menu(Home),
-    Sessions(Menu),
+    Sessions(Home),
     Thread(Sessions),
-    Bots(Menu),
-    Setup(Menu),
+    Bots(Home),
+    Setup(Home),
 }
 
 /** Use the SDK stack, including missing parents when opening a thread directly from Home. */
@@ -18,7 +17,7 @@ internal fun Route.openFrom(
     forward: (Route) -> Unit,
 ) {
     if (this == from) return
-    // Long-back keeps Setup as a child of the current screen; Settings uses the same SDK push.
+    // Long-back keeps Setup as a child of the current screen.
     if (this == Route.Setup) {
         forward(this)
         return

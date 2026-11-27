@@ -57,12 +57,20 @@ kotlin {
     }
 }
 
+// Composition-only unit tests need the real JVM runtime, not Android's unimplemented Trace APIs.
+// This changes only unit-test execution; the APK and Android compile classpaths stay untouched.
+configurations.matching { it.name.endsWith("UnitTestRuntimeClasspath") }.configureEach {
+    exclude(group = "androidx.compose.runtime", module = "runtime-android")
+}
+
 dependencies {
     implementation(project(":sdk:client"))
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.kotlinx.coroutines)
     testImplementation("org.jetbrains.kotlin:kotlin-test-junit:2.3.20")
+    testRuntimeOnly(platform(libs.compose.bom))
+    testRuntimeOnly("androidx.compose.runtime:runtime-desktop@jar")
 }
 
 // Same developer/apkInbox HMAC protocol as light-tern; never a bearer credential.

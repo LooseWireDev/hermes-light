@@ -78,3 +78,10 @@ with the parent, as requested. No adb/emulator driving or release signing is per
 - [ ] 8.2 Home: replace the deck placeholder with a conditional status strip — zero height when nothing needs attention; one line ("1 approval · 1 running") when work is active or pending; activating it opens the relevant surface. No "DECK" label, no placeholder text.
 - [ ] 8.3 Wheel-up past the thread top does nothing (no screen change); update the menu-routing tests to the new back chain and add a test that the strip renders nothing when idle.
 - [ ] 8.4 Bump lighttool.toml to versionCode 102 / versionName 0.1.2; gates green; device screenshots appended to evidence.md.
+
+8.1–8.4 are implemented; all four requested gates passed (77 unit tests). The strip has an
+Android-free composition test proving idle emits no layout nodes, so reserves zero height.
+No adb/emulator driving was authorized; LP3 visual/wheel acceptance and 8.4's screenshots remain
+unperformed. Visual acceptance boxes stay unchecked; no specs have been synced as accepted behavior.
+Wheel-only Home actions are reached from the newest end (History → Bots → active strip → thread);
+the oldest thread boundary remains inert. Empty Home starts at History.

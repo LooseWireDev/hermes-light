@@ -8,7 +8,7 @@ thumb-and-wheel device can actually carry.
 
 Hermes Light is not a port. It is a small, purpose-built client:
 
-- **Info Deck on top** — glanceable tiles (running sessions, cron, approvals, unread).
+- **Conditional status strip** — one line for running turns and pending notices; zero height when idle.
 - **Thread below** — read and send in any session, streamed live; **hold the wheel** to talk.
 - **Wheel-first** — scroll, page, open, back; no chrome, no chip rows, no sheets that eat the screen.
 
@@ -25,11 +25,11 @@ Reuse and attribution rules live in `AGENTS.md`; the protocol surface is documen
 
 ## Status
 
-M0.1 implementation: dashboard setup, encrypted connection profile, a full-page Menu (Chat, History,
-Bots, disabled Cron, Settings), recent sessions and source/profile selection, read-only paged
-transcripts, and a placeholder deck. Socket status and desktop-only approval/clarification notices
-are visible. Sending, streaming rendering, voice and live deck data
-are **not implemented in M0**.
+M0.3 implementation: dashboard setup with explicit credential Paste actions, encrypted connection
+profile, Home top-bar History/Bots actions, recent sessions and source/profile selection, and
+read-only paged transcripts. The conditional strip opens pending approvals/clarifications or a
+running session; approvals remain desktop-only. Socket status stays visible. No menu page or deck
+placeholder. Sending, streaming rendering and voice are **not implemented in M0**.
 
 ## Local build
 
@@ -81,10 +81,13 @@ HTTP is for trusted development networks: credentials and transcripts are otherw
 Profiles and per-session read positions are AES-GCM encrypted with an Android Keystore key; app
 data backup must not be used to transfer that key to another device.
 
-Turn the wheel to focus/scroll, click to open or expand, back to return one level. Home's Menu action
-opens the full destination page directly; wheeling past the deck top does the same. Chat returns to
-Home's current session and read position. Back follows Thread → Sessions → Menu → Home; long-back
-opens Setup. Setup starts with an editable loopback address, saved only after connection succeeds.
+Turn the wheel to focus/scroll, click to open or expand, back to return one level. Home's History
+and Bots actions open their screens directly. Back follows Thread → Sessions → Home; long-back
+opens Setup. Wheeling beyond the thread's oldest row never changes focus or navigates elsewhere.
+On Home, turning down past the newest message focuses History, Bots and any active strip before
+returning to the thread; `›` marks the focused action. Empty Home starts at History.
+The strip prioritizes pending approvals, then clarifications, then running sessions; idle means no
+strip and no reserved space. Setup starts with an editable loopback address, saved only after connection succeeds.
 Tool rows show names (call ids only as a fallback) and outcomes; tool/reasoning rows expand and
 timestamps are available on demand. Secondary text uses the next SDK tone (`content`).
 Approval and clarification notices are read-only: respond on the desktop. No turn or

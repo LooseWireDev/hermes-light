@@ -6,8 +6,8 @@ One SDK-owned activity, with `@InitialScreen MainActivity : SimpleLightScreen<Un
 SDK's final `SealedLightActivity` wrapper; six destinations, no drawer, no tab bar, no sheets:
 
 ```
-Home  ── top bar: History ─┬─ Sessions ── Thread ── back ── Home
-      ├─ top bar: Bots ────┴─ Bots ─────── back ── Home
+Home  ── top bar: History ─── Sessions ── Thread
+      ├─ top bar: Bots ────── Bots ─────── back ── Home
       └─ long-back ────────── Setup
       status strip above the thread: only when something needs attention, zero height when idle
 Approvals ── rendered inline in thread (M1)
@@ -18,9 +18,12 @@ Navigation is two top-bar actions on Home plus long-back for Settings; nothing m
 whose content fills under half the viewport.
 
 Wheel contract (identical everywhere):
-- **Turn** moves a focus list one row (`WheelScroll`); at the thread's end, turning further reaches
-  the deck; at the deck's top, turning further opens the full Menu page.
-- **Click** opens the focused row (session → thread; bot → filtered sessions; deck tile → target).
+- **Turn** scrolls the thread or moves a list one row (`WheelScroll`); at the thread's top, older
+  history loads if available, otherwise nothing happens. Focus never crosses at the oldest end.
+  On Home, turning down past the newest end focuses History, Bots, then the strip if present, and
+  returns to the thread. Empty Home starts at History and skips absent content. A `›` marks the
+  focused action; wheel-click activates it. Reverse turns walk the same actions back to the thread.
+- **Click** opens the focused action or row (session → thread; bot → filtered sessions).
 - **Hold** = reserved in M0; push-to-talk (`WheelTalk`), release-to-send and turn-to-cancel start in M1.
 - **Back** = one level up; back at Home = nothing (stay, per LightOS convention).
 
@@ -30,7 +33,6 @@ Wheel contract (identical everywhere):
 | --- | --- | --- | --- |
 | 1 | Setup | Server URL field, "Sign in" (password form) or "Use token", connection test row, honest error line | `GET api/status`, `api/auth/providers`, `POST /auth/password-login`, loopback SPA token |
 | 2 | Home | Top bar: title + **History** + **Bots** actions; conditional status strip; June thread; status line | same as Thread |
-| 2b | Menu | Full-page destination list: Chat / History / Bots / Cron (disabled, "arrives with live tiles") / Settings; Back to Home | none |
 | 3 | Sessions | List of sessions: title / source / age / live dot; footer row "Bots"; top row "New session" (M1 sends) | `GET api/sessions?limit=50&order=recent&exclude_sources=cron` |
 | 4 | Thread | Transcript, wheel-scrolled, bottom-anchored; reasoning/tool one-liners; streaming caret (M1) | `GET api/sessions/{id}/messages?order=latest&limit=50&include_compacted=true`, `.../messages/around` |
 | 5 | Bots | Rows: name + source tag; maps to session selection | `GET api/sessions?source=` + bot ids from config (M0: derived from sessions) |
@@ -54,8 +56,8 @@ Wheel contract (identical everywhere):
 
 ## Light SDK usage
 
-- Widgets: `LightText` variants for all type, `LightTopBar` for page titles and Home's **Menu**
-  action, `LightBarButton` for bar actions, `SimpleLightScreen` for full screens.
+- Widgets: `LightText` variants for all type, `LightTopBar` for page titles and Home's **History** /
+  **Bots** actions, `LightBarButton` for bar actions, `SimpleLightScreen` for full screens.
 - Tokens: `LightThemeTokens` spacing/colors; AMOLED black background. Secondary text is lifted from
   `contentSecondary` to `content`; disabled titles and dividers retain the secondary tone.
 - Input: `com.gios.light.common.hw.WheelScroll` (from BrightHermes, owner's code) wrapped for our

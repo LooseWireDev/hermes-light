@@ -126,3 +126,32 @@ copy) — the same path Bitwarden's Copy takes.
 - `Paste Token` masked the value (32 dots for a 32-character clipboard string) and kept the value
   usable for Test/Sign in.
 - Hint line "Copied a password from Bitwarden? Use Paste." renders under the credential rows.
+
+## 2026-11-26 — M0.3 Home actions and conditional status strip
+
+Removed Menu and the deck models/placeholder. Home now has SDK History/Bots bar actions, long-back
+Setup, and Thread → Sessions → Home back routing. Wheel-up stays in the transcript (older paging
+remains). One attention line prioritizes approvals, then clarifications, then running sessions;
+activation opens the relevant thread, never answers a notice. No cron/unread state exists yet.
+Idle emits no layout nodes or spacer. Metadata: **102 / 0.1.2**.
+
+Final verification with the requested Android/JDK environment:
+`./gradlew -Porg.gradle.java.installations.paths="$HOME/.local/share/light-tern-toolchain/jdk17,$HOME/.local/opt/temurin21" ktlintCheck checkColorLiterals :tool:testDebugUnitTest :tool:assembleDebug --continue --console=plain`
+— **BUILD SUCCESSFUL in 3s; 77 tests, zero failures/errors/skips**. Coverage includes the new back
+chain, attention counts/priority/settlement, idle composition emitting no layout nodes (therefore
+zero reserved height, even with stale focus), and wheel-only action traversal with an inert oldest
+thread boundary. Idle-after-`done` and desktop approval settlement are also covered.
+
+The SDK rejects Robolectric even as a test dependency; no SDK policy was changed. Composition-only
+tests use the official AndroidX desktop runtime on the unit-test runtime classpath, with the BOM's
+version; Android compile/APK dependencies are unchanged. Initial gate failures were that dependency
+restriction, Android Trace stubs in the unit-test runtime, and one ktlint chain; all resolved.
+Local/development SDK `main` at `251237ef3778c907c5dbd89e84685532c9d99a28`, existing SDK edits untouched.
+Artifact: `tool/build/outputs/apk/debug/tool-debug.apk`. No adb/emulator, screenshots, phone install,
+release signing, upload or push. LP3 visual/wheel acceptance remains unperformed.
+
+Wheel-only reachability: down past the newest message focuses History → Bots → active strip →
+thread; empty Home starts at History and skips absent content. The SDK bar/strip text marks focus
+with `›`; no extra chrome, page or hold gesture. Reverse traversal returns to the newest thread,
+but up at its oldest boundary never crosses focus. A final ktlint nested-conditional issue was
+fixed before the successful four-gate run above. LP3 visual acceptance is still unperformed.
