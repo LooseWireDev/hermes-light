@@ -1,24 +1,36 @@
-# Deck Surface Spec Delta
+# Status Strip Spec Delta
 
 ## Purpose
 
-Home's top zone: glanceable, wheel-reachable state that answers "what needs me?" in one look. M0
-establishes the surface (a placeholder), M2 fills it with live tiles.
+A single glanceable line above the thread that answers "does anything need me?" — and occupies zero
+height when the answer is no. (Owner decision after alpha2: a permanent deck header read as dead
+space on the phone.)
 
 ## ADDED Requirements
 
-### Requirement: Two-zone Home
+### Requirement: Conditional strip, zero space when idle
 
-Home SHALL present a deck zone above the thread zone. Wheel-up from the thread's top SHALL move focus
-into the deck; wheel-up from the deck's top SHALL open the Sessions screen. The deck zone MUST not
-scroll the thread or steal focus while the user is reading.
+Home SHALL render a status strip above the thread ONLY when something needs attention (a running
+turn, a pending approval, a fired cron job, unread replies). When nothing needs attention the strip
+MUST render nothing and occupy zero height — no header, no placeholder, no reserved space. The strip
+SHALL be one line: a short summary plus a count, and activating it opens the relevant surface.
 
-#### Scenario: Focus crossing
+#### Scenario: Nothing needs attention
 
-- **WHEN** the thread is scrolled to its top and the user turns the wheel up once more
-- **THEN** focus enters the deck at its bottom tile, and turning back down returns focus to the thread where it left off
+- **WHEN** no turn is running and nothing is pending
+- **THEN** the strip is absent and the thread starts at the top of the content area, with no label and no blank row
 
-#### Scenario: Empty deck
+#### Scenario: Something needs attention
 
-- **WHEN** no tiles are available (M0)
-- **THEN** the deck shows a single calm line stating that tiles arrive with live data, and the thread is fully usable above it
+- **WHEN** one approval is pending and a turn is running
+- **THEN** one line reads e.g. "1 approval · 1 running", activating it opens the approval
+
+### Requirement: Focus crossing without a deck
+
+Wheel-up from the thread's top SHALL remain a scroll gesture only; when it reaches the top nothing
+else opens. Navigation is performed through Home's top-bar actions (home-actions spec).
+
+#### Scenario: Wheeling past the top
+
+- **WHEN** the thread is at its top and the user keeps turning up
+- **THEN** nothing opens and nothing changes, and the status strip (if present) remains a passive line

@@ -6,20 +6,16 @@ One SDK-owned activity, with `@InitialScreen MainActivity : SimpleLightScreen<Un
 SDK's final `SealedLightActivity` wrapper; six destinations, no drawer, no tab bar, no sheets:
 
 ```
-Home (deck tiles M2 above, June thread below)
-  ▲ menu action in the top bar, or wheel-up past the deck
-  │
-Menu  ── Chat / History / Bots / Cron (M2) / Settings
-  ├── Chat    → Home (current thread)
-  ├── History → Sessions → Thread → Back → Sessions → Back → Menu
-  ├── Bots    → Bots → Back → Menu
-  └── Settings→ Setup
+Home  ── top bar: History ─┬─ Sessions ── Thread ── back ── Home
+      ├─ top bar: Bots ────┴─ Bots ─────── back ── Home
+      └─ long-back ────────── Setup
+      status strip above the thread: only when something needs attention, zero height when idle
 Approvals ── rendered inline in thread (M1)
 ```
 
-The menu is a **full page, not a drawer**: one wheel-focusable list of destinations in the Light
-row style, a title bar with Back, and nothing else. It replaces the wheel-the-whole-thread shortcut
-as the primary way to reach other screens.
+No separate menu page exists (owner decision after alpha2: a five-row page reads as dead space).
+Navigation is two top-bar actions on Home plus long-back for Settings; nothing may ship as a page
+whose content fills under half the viewport.
 
 Wheel contract (identical everywhere):
 - **Turn** moves a focus list one row (`WheelScroll`); at the thread's end, turning further reaches
@@ -33,7 +29,7 @@ Wheel contract (identical everywhere):
 | # | Screen | Content | Data |
 | --- | --- | --- | --- |
 | 1 | Setup | Server URL field, "Sign in" (password form) or "Use token", connection test row, honest error line | `GET api/status`, `api/auth/providers`, `POST /auth/password-login`, loopback SPA token |
-| 2 | Home | Top bar with **Menu** action; deck placeholder (M0), June thread below; status line | same as Thread |
+| 2 | Home | Top bar: title + **History** + **Bots** actions; conditional status strip; June thread; status line | same as Thread |
 | 2b | Menu | Full-page destination list: Chat / History / Bots / Cron (disabled, "arrives with live tiles") / Settings; Back to Home | none |
 | 3 | Sessions | List of sessions: title / source / age / live dot; footer row "Bots"; top row "New session" (M1 sends) | `GET api/sessions?limit=50&order=recent&exclude_sources=cron` |
 | 4 | Thread | Transcript, wheel-scrolled, bottom-anchored; reasoning/tool one-liners; streaming caret (M1) | `GET api/sessions/{id}/messages?order=latest&limit=50&include_compacted=true`, `.../messages/around` |

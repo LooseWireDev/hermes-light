@@ -71,3 +71,10 @@ contrast step, plus the 6.5 screenshot portion, remains with the parent; those b
 7.1–7.2 are implemented; visual boxes remain unchecked for the parent's LP3 acceptance. 7.4's
 metadata is 101 / 0.1.1; all four requested debug gates passed. Release assembly/signing remains
 with the parent, as requested. No adb/emulator driving or release signing is performed here.
+
+## 8. M0.3 — remove the menu page, make the strip conditional (owner feedback)
+
+- [ ] 8.1 Delete `Route.Menu` + `MenuScreen`; Home top bar gets **History** and **Bots** actions; Settings stays on long-back. Back chain becomes Thread → Sessions → Home.
+- [ ] 8.2 Home: replace the deck placeholder with a conditional status strip — zero height when nothing needs attention; one line ("1 approval · 1 running") when work is active or pending; activating it opens the relevant surface. No "DECK" label, no placeholder text.
+- [ ] 8.3 Wheel-up past the thread top does nothing (no screen change); update the menu-routing tests to the new back chain and add a test that the strip renders nothing when idle.
+- [ ] 8.4 Bump lighttool.toml to versionCode 102 / versionName 0.1.2; gates green; device screenshots appended to evidence.md.

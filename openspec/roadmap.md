@@ -19,8 +19,8 @@ length, `Listener` bounded previews — so long dictation never truncates.
 
 ## M2 — Deck that earns its keep
 
-Tiles from live data: Running sessions, Cron (next run + last outcome), Approvals pending, Unread.
-Deck provider surface + in-app deck. Bots picker as a deck tile handled by the thread.
+Strip content from live data: running turns, pending approvals, cron fired/unread. One line, zero height
+when idle. No tiles, no permanent header.
 
 ## M3 — Daily-driver polish
 
@@ -30,9 +30,9 @@ sideload via the owner's tools).
 
 ## Standing constraints
 
-- Seven screens maximum: Home (deck+thread), **Menu**, Sessions, Thread, Bots, Approvals-inline, Setup.
-  The menu is a full page in Light row style, not a drawer (owner decision, supersedes the
-  wheel-the-whole-thread shortcut).
+- Five screens maximum: Home (conditional strip + thread), Sessions, Thread, Bots, Approvals-inline, Setup.
+  No menu page, no drawer, no tab bar (owner decision after alpha2). A page whose content fills under
+  half the viewport does not ship.
 - Admin surfaces (kanban board, files, MCP, skills, logs, config editors) are out of scope forever;
   they live on the desktop client and in the Hermes Mobile fork.
 - Never auto-approve; never fabricate `done`.
