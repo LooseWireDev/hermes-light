@@ -2,7 +2,8 @@
 
 ## Shape of the app
 
-One activity (`SealedLightActivity`), six destinations, no drawer, no tab bar, no sheets:
+One SDK-owned activity, with `@InitialScreen MainActivity : SimpleLightScreen<Unit>` receiving the
+SDK's final `SealedLightActivity` wrapper; six destinations, no drawer, no tab bar, no sheets:
 
 ```
 Home ── deck tiles (M2) ──┐
@@ -17,7 +18,7 @@ Wheel contract (identical everywhere):
 - **Turn** moves a focus list one row (`WheelScroll`); at the thread's end, turning further reaches
   the deck; at the deck's top, turning further opens the Sessions overlay.
 - **Click** opens the focused row (session → thread; bot → thread of that bot; deck tile → target).
-- **Hold** = push-to-talk (`WheelTalk`); release sends, turn-to-cancel.
+- **Hold** = reserved in M0; push-to-talk (`WheelTalk`), release-to-send and turn-to-cancel start in M1.
 - **Back** = one level up; back at Home = nothing (stay, per LightOS convention).
 
 ## Screen inventory (M0)
@@ -41,7 +42,7 @@ Wheel contract (identical everywhere):
   error — copy the lesson, not the code, from the fork.
 - `net/Api.kt` — sessions family only in M0: `sessions`, `sessions/{id}`, `sessions/{id}/messages`,
   `messages/around`; OkHttp + kotlinx.serialization (strict, unknown keys ignored).
-- `net/Gateway.kt` — JSON-RPC WS: `hello`/`client.capabilities`, reconnect with backoff, event
+- `net/Gateway.kt` — JSON-RPC WS: `gateway.ready`/`client.capabilities` identity handshake, reconnect with backoff, event
   reducer for `message.*`, `reasoning.*`, `approval.*`, `clarify.*`, `process.*`, `done`, `error`.
   In M0 the socket may be read-only (no turn submission).
 - `data/Store.kt` — persisted profile: base URL, credential (encrypted at rest via Android Keystore),
@@ -98,11 +99,10 @@ hermes-light/
 ├── docs/research/00-two-apps-and-apis.md
 ├── openspec/…  (this change)
 ├── settings.gradle.kts (includeBuild ../light-sdk/plugin)  build.gradle.kts  gradle/libs.versions.toml  gradlew…
-└── app/
-    ├── build.gradle.kts        # :tool, package dev.loosewire.hermeslight, minSdk per LP3 (34), target 37
-    └── src/main/
-        ├── AndroidManifest.xml # single activity, tool metadata for LightOS install
-        └── kotlin/dev/loosewire/hermeslight/
+└── tool/
+    ├── build.gradle.kts        # :tool, package dev.loosewire.hermeslight, minSdk 34, target 37
+    ├── lighttool.toml          # identity, permissions; SDK generates the manifest and activity
+    └── src/main/kotlin/dev/loosewire/hermeslight/
             ├── MainActivity.kt ui/{Home,Sessions,Thread,Bots,Setup}Screen.kt
             ├── ui/common/{LightRow,Wheel*,StatusLine}.kt
             ├── net/{Endpoint,Auth,Api,Gateway}.kt

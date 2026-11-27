@@ -49,8 +49,8 @@ None — new repository, no prior behavior.
 
 ## Impact
 
-- New repo `gi-os/hermes-light`, package `com.gios.hermeslight`, module `:app`, Kotlin + Compose on
-  the Light SDK; no Material3 chrome.
+- New repo `LooseWireDev/hermes-light`, package `dev.loosewire.hermeslight`, module `:tool`, Kotlin +
+  Compose on the Light SDK; no Material3 chrome.
 - Operates against the existing Hermes dashboard (the owner's, over Tailscale; loopback for tests).
 - Adds no server-side changes. Attaches an Apache-2.0 NOTICE for derived protocol handling.
 - Six screens max; ~10k LOC ceiling for M1–M3.

@@ -29,15 +29,20 @@ instead.
 
 ```bash
 export ANDROID_HOME=$HOME/.local/share/light-tern-toolchain/android-sdk
-export JAVA_HOME=$HOME/.local/opt/temurin21        # release + lint need 21; debug builds work on 17
-./gradlew :app:assembleDebug                      # or the module name once scaffolded
+export JAVA_HOME=$HOME/.local/opt/temurin21        # JVM 21 for all tool variants
+./gradlew :tool:assembleDebug
 ./gradlew ktlintCheck checkColorLiterals           # color guard: no hardcoded Color literals
-./gradlew testDebugUnitTest
+./gradlew :tool:testDebugUnitTest
 ```
 
 - JDK 21 for `lintVital`/release; portable adb at `~/.local/opt/platform-tools`.
 - Releases are built and signed **locally**, never in GitHub Actions (Actions stay disabled on the
   owner's forks; signing keys never leave the machine).
+- Local debug signing: `~/keys/hermes-light/hermes-light-dev.jks`, alias `hermes-light-dev`,
+  standard development password `android` (not a release key). Override the path with
+  `-Phermes.signingStore=/path/to/hermes-light-dev.jks`. Never commit or upload this key.
+- SDK generates the manifest and Android activity; `MainActivity` is the `@InitialScreen`
+  `SimpleLightScreen` receiving a `SealedLightActivity`, not an Android activity subclass.
 
 ## Verification
 
