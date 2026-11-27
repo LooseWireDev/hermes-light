@@ -361,6 +361,10 @@ internal class AppController(
                 }
                 loadSessions(reset = true)
                 refreshAttention()
+                if (menuVisible) {
+                    loadMenu()
+                    loadBots()
+                }
                 authenticated.selectedSessionId?.let { openSession(it, remembered = true) }
             }
         } catch (error: CancellationException) {
@@ -402,11 +406,18 @@ internal class AppController(
                 try {
                     val page = api.sessions(endpoint, limit = 3)
                     if (epoch != connectionEpoch) return@launch
-                    mutable.update { it.copy(menuSessions = page.sessions, menuSessionCount = page.total) }
+                    mutable.update {
+                        it.copy(
+                            menuSessions = page.sessions,
+                            menuSessionCount = page.total.takeIf { total -> total > 0 || page.sessions.isEmpty() },
+                        )
+                    }
                 } catch (error: CancellationException) {
                     throw error
                 } catch (error: Exception) {
-                    mutable.update { it.copy(menuError = error.message ?: "Sessions unavailable") }
+                    mutable.update {
+                        it.copy(menuSessions = emptyList(), menuSessionCount = null, menuError = error.message ?: "Sessions unavailable")
+                    }
                 }
                 try {
                     val jobs = api.cronJobs(endpoint, selectedProfile(saved))
@@ -597,7 +608,7 @@ internal class AppController(
         if (mutable.value.botsLoading) return
         botsJob =
             scope.launch {
-                mutable.update { it.copy(botsLoading = true, operationError = null) }
+                mutable.update { it.copy(botsLoading = true, botsLoaded = false, operationError = null) }
                 val counts = linkedMapOf<String, BotSource>()
                 val seen = mutableSetOf<String>()
                 var offset = 0

@@ -76,7 +76,9 @@ private class FakeScheduler : WheelScheduler {
     fun pending(): Int = tasks.count { !it.cancelled }
 }
 
-private class Harness(voiceEnabled: Boolean = true) {
+private class Harness(
+    voiceEnabled: Boolean = true,
+) {
     val scheduler = FakeScheduler()
     var clicks = 0
     var starts = 0

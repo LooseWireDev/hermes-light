@@ -47,7 +47,12 @@ class MainThreadWheelScheduler(
     }
 }
 
-/** Wheel presses seen since launch, for the diagnostics readout. */
+/**
+ * Wheel keys seen since launch, for the diagnostics readout.
+ *
+ * [clicks] counts DOWN events on the click key, not completed clicks: a hold that started proves
+ * the key reached the app too, which is exactly what the BrightControl diagnosis needs.
+ */
 data class WheelCounters(
     val clicks: Int = 0,
     val turns: Int = 0,

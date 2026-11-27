@@ -105,7 +105,7 @@ fun ThreadScreen(
                 status = state.status,
                 modifier =
                     Modifier.lightTapAndLongPress(
-                        onTap = {},
+                        onTap = { if (state.wheelDiagnostics != null) actions.onDiagnostics() },
                         onLongPress = actions.onDiagnostics,
                         onLongClickLabel = "Wheel diagnostics",
                     ),

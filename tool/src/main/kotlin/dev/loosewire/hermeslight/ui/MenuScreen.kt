@@ -287,10 +287,12 @@ private fun MenuRow(
     }
 }
 
-private fun MenuExpansion?.toggle(target: MenuExpansion): MenuExpansion? =
-    if (this == target) null else target
+private fun MenuExpansion?.toggle(target: MenuExpansion): MenuExpansion? = if (this == target) null else target
 
-private fun countText(count: Int?, noun: String): String =
+private fun countText(
+    count: Int?,
+    noun: String,
+): String =
     when {
         count == null -> "$noun count unavailable"
         count == 1 -> "1 $noun"

@@ -240,3 +240,63 @@ logcat trace of the missed event.
 Also observed (not defects): the seeded "Test session" row 404s honestly (`Not found on the dashboard
 (HTTP 404)`) because that transcript no longer exists; the microphone-permission row is the expected
 AVD state with no dictation available.
+
+## 2026-11-27 — wheel task group 11 and Menu v2 task group 12
+
+- Scope is the **Wheel + voice wiring** group 11, not the separate, duplicate-numbered terminal
+  event group 11 above. Native SDK key ownership now lives in a `LightScreen` view model with one
+  `WheelTalk` instance per screen. `WheelScroll` binds current callbacks without recreating the
+  state machine. SDK labels are preferred; raw 19/20/66/80/27 fallback is documented. Both key
+  halves are consumed; unrelated keys, Back and Home pass through the wheel handler.
+- Thread click sends the existing draft or requests Stop; focused approval/clarify rows retain
+  explicit activation. Bare turns drive the thread reader; a pressed turn spends/cancels the
+  gesture. List screens use the same native handler, with holds disabled. Composer wheel actions
+  remain bound while the SDK keyboard is open.
+- First voice use checks RECORD_AUDIO and asks through the SDK once per app lifetime. Missing
+  permission names **LightOS Settings**. This is **not a completed voice implementation**:
+  `tool/.../voice/Listener.kt` does not exist, the only ported voice implementation is
+  `DictationTake`, and the owner Listener requires unallowlisted sherpa-onnx plus absent Parakeet
+  assets. A granted hold reports the missing recognizer rather than claiming capture/send.
+  The SDK exposes PCM capture, not recognition. The dashboard transcription engine is now tracked
+  separately by the owner's newly-added task group 13; it is outside this run's groups 11–12.
+  Task 11.2 remains open until that engine is integrated.
+- Long-press Thread's status line reads process-wide wheel click/turn counts, current microphone
+  grant and SDK launchable-app detection for BrightControl (`com.gios.lightcontrol`); detection
+  errors are “unavailable”, not “not installed”. The SDK `app-access` capability is added solely
+  for this diagnostic (launcher-scoped package visibility; no QUERY_ALL_PACKAGES).
+- **Release/setup note:** BrightControl's per-app rule for `dev.loosewire.hermeslight` must be
+  **Off / hands-off** so wheel clicks and camera presses reach Hermes Light.
+  `com.thelightphone.*` and `com.gios.*` are hands-off by default; our package is not. When click
+  count is zero, diagnostics names this exact rule as the suggested fix.
+- Home now exposes a single Menu action. Menu shows connection/model/session state, live History/
+  Bots/Cron counts, Settings, About and three app-wide recent sessions. Counts are fetched rather
+  than invented; failed Cron fetches are unavailable, not “0 jobs”. Cron and About expand inline,
+  keeping six screens. Recent-thread Back follows **Thread → Sessions → Menu → Home**, resolving
+  the older contradictory recent-row scenario in favor of the user's explicit chain.
+- Metadata: **105 / 0.2.1**. Local/development lane; SDK `main`
+  `251237ef3778c907c5dbd89e84685532c9d99a28`, owner fork `gavdevs/light-sdk`, existing SDK edits
+  untouched. No SDK policy changes, new dependencies, adb/emulator, install, signing, upload or
+  push. LP3 visual/hardware acceptance is unverified and its boxes remain open.
+- Obsidian canonical vault remains unavailable: `Home.md` and `Projects/Projects.md` under
+  `/home/gav/Documents/obsidian-vault` were not found. This evidence note retains the intended
+  durable project update; no vault note was changed.
+
+### Verification after the last code edit
+
+Requested environment (`ANDROID_HOME`, JDK 21 and both Java installation paths), command:
+
+```sh
+./gradlew -Porg.gradle.java.installations.paths="$HOME/.local/share/light-tern-toolchain/jdk17,$HOME/.local/opt/temurin21" ktlintCheck checkColorLiterals :tool:testDebugUnitTest :tool:assembleDebug --continue --console=plain
+```
+
+**BUILD SUCCESSFUL in 5s.** The preceding successful run's XML reports **179 tests in 21 files,
+zero failures/errors/skips**; the final run passed after removing an unnecessary AppState copy
+from the Menu row projection. The first gate run exposed ktlint wrapping and two new Cron tests
+using the shared HTTP client's already-closed executor; tests now use the existing isolated-client
+fixture pattern. No production client lifecycle changes were made.
+
+Coverage adds deterministic hold threshold (including delayed main-loop callback), pre-/post-hold
+turn cancel, missing/orphan UP, lifecycle reset, shutter cancellation, list mode, SDK/raw mappings,
+both key halves and Back/Home fallthrough; Menu back-chain/focus and authenticated Cron count/
+unavailable responses. Debug APK: `tool/build/outputs/apk/debug/tool-debug.apk`.
+Existing SDK publication and compile-SDK warnings remain. No UI/device acceptance is claimed.

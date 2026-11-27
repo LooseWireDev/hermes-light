@@ -67,8 +67,7 @@ class Api(
     suspend fun cronJobs(
         endpoint: Endpoint,
         profile: String? = null,
-    ): List<CronJobSummary> =
-        decode(getJson(endpoint, emptyList(), mapOf("profile" to profile), basePath = "api/cron/jobs"))
+    ): List<CronJobSummary> = decode(getJson(endpoint, emptyList(), mapOf("profile" to profile), basePath = "api/cron/jobs"))
 
     suspend fun sessions(
         endpoint: Endpoint,

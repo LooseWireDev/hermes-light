@@ -88,11 +88,11 @@ class ThreadWheelViewModel(
 
     /** The Compose preview path, which sees the same [KeyEvent]s the activity would. */
     fun dispatch(event: KeyEvent): Boolean =
-        dispatch(
-            keyCode = event.keyCode,
-            down = event.action == KeyEvent.ACTION_DOWN,
-            repeatCount = event.repeatCount,
-        )
+        when (event.action) {
+            KeyEvent.ACTION_DOWN -> dispatch(event.keyCode, down = true, repeatCount = event.repeatCount)
+            KeyEvent.ACTION_UP -> dispatch(event.keyCode, down = false, repeatCount = event.repeatCount)
+            else -> false
+        }
 
     override fun onKeyDown(
         keyCode: Int,

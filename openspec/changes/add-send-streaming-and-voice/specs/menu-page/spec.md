@@ -33,7 +33,7 @@ thread directly, so the page continues to be useful after the destinations are l
 #### Scenario: Jump to a recent thread
 
 - **WHEN** the user activates a recent-session row
-- **THEN** the thread opens for that session and Back returns to the Menu
+- **THEN** the thread opens for that session and repeated Back walks Sessions → Menu → Home
 
 ### Requirement: One action per screen, still
 

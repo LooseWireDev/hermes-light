@@ -1,5 +1,6 @@
 package dev.loosewire.hermeslight
 
+import dev.loosewire.hermeslight.data.SessionSummary
 import dev.loosewire.hermeslight.ui.SessionRowUi
 import dev.loosewire.hermeslight.ui.StatusLineModel
 import dev.loosewire.hermeslight.ui.StatusStripUi
@@ -67,8 +68,11 @@ internal fun AppState.statusStripUi(): StatusStripUi? {
     return StatusStripUi(summary, session?.takeUnless { it == GLOBAL_NOTICE })
 }
 
-internal fun AppState.sessionRows(now: Long): List<SessionRowUi> =
-    sessions.map { session ->
+internal fun AppState.sessionRows(
+    now: Long,
+    rows: List<SessionSummary> = sessions,
+): List<SessionRowUi> =
+    rows.map { session ->
         SessionRowUi(
             id = session.id,
             title = session.title.ifBlank { session.id },

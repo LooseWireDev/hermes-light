@@ -24,10 +24,10 @@ class ApiTest {
                 assertEquals("june", queryParameters(exchange.requestURI)["profile"])
                 exchange.respondJson(200, """[{"id":"job-1","name":"Morning","state":"paused","extra":true}]""")
             }.use { server ->
-                val api = Api(tokenProvider = { "menu-token" })
+                val api = Api(newHttpClient(), tokenProvider = { "menu-token" })
                 assertEquals(
                     listOf(CronJobSummary("job-1", "Morning", "paused")),
-                    api.cronJobs(Endpoint.parse("${server.baseUrl}/dash"), "june"),
+                    api.cronJobs(Endpoint.parse("${server.baseUrl}dash/"), "june"),
                 )
             }
         }
@@ -39,7 +39,7 @@ class ApiTest {
             TestHttpServer { exchange ->
                 exchange.respondJson(status, "[]")
             }.use { server ->
-                val api = Api()
+                val api = Api(newHttpClient())
                 val endpoint = Endpoint.parse(server.baseUrl)
                 assertEquals(emptyList(), api.cronJobs(endpoint))
                 status = 503

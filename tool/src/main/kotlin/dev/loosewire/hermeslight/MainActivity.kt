@@ -86,8 +86,7 @@ class MainActivity(
     override fun onScreenDestroy() = controller.close()
 
     @Composable
-    override fun Content() =
-        Surface(controller, Route.Home, position, viewModel, voice) { lightContext.appAccess.apps }
+    override fun Content() = Surface(controller, Route.Home, position, viewModel, voice) { lightContext.appAccess.apps }
 }
 
 /** Kept by the SDK screen instance while a child covers its composition. */
@@ -200,8 +199,6 @@ private fun SimpleLightScreen<Unit>.Surface(
             onAction = { action ->
                 if (action == "compose") {
                     composing = true
-                } else if (action == "microphone") {
-                    voice.feedback = "Hold the wheel to request microphone access"
                 } else if (route == Route.Home && (action.startsWith("approval:") || action.startsWith("clarify:"))) {
                     open(controller, route, Route.Thread, voice)
                 } else {
@@ -222,7 +219,11 @@ private fun SimpleLightScreen<Unit>.Surface(
                 }
             },
             onHoldCancel = { voice.feedback = "Voice cancelled — nothing sent" },
-            onDiagnostics = {
+            onDiagnostics = diagnostics@{
+                if (voice.diagnostics != null) {
+                    voice.diagnostics = null
+                    return@diagnostics
+                }
                 scope.launch {
                     val granted = hasRecordAudioPermission()
                     val installed =
@@ -284,16 +285,18 @@ private fun SimpleLightScreen<Unit>.Surface(
                             botCount = state.bots.size.takeIf { state.botsLoaded },
                             cronCount = state.menuCronCount,
                             cronSummary = state.menuCronSummary,
-                            recentSessions =
-                                state.copy(sessions = state.menuSessions)
-                                    .sessionRows(System.currentTimeMillis()),
+                            recentSessions = state.sessionRows(System.currentTimeMillis(), state.menuSessions),
                             error = state.menuError,
                         ),
                         MenuActions(
-                            onHistory = { open(controller, route, Route.Sessions, voice) },
+                            onHistory = {
+                                if (state.selectedBot != null) controller.selectBot(null)
+                                open(controller, route, Route.Sessions, voice)
+                            },
                             onBots = { open(controller, route, Route.Bots, voice) },
                             onSettings = setup,
                             onOpenSession = {
+                                if (state.selectedBot != null) controller.selectBot(null)
                                 controller.openSession(it)
                                 open(controller, route, Route.Thread, voice)
                             },

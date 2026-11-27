@@ -113,23 +113,29 @@ on the session's own model. The defect is the *end* of the turn.
 
 ## 11. Wheel + voice wiring (device blocker #3 — hold does nothing)
 
-Root cause: `hw/WheelTalk.kt` was ported but nothing instantiates it and no screen claims a key, so
-the SDK forwards every notch/click to LightOS. LightOS also hands keys to the screen first, so a
-tool can take the wheel itself.
+Root cause: `hw/WheelTalk.kt` was ported but nothing instantiated it and no screen claimed a key,
+so the SDK forwarded every notch/click to LightOS. SDK key ownership is now implemented; full
+voice remains blocked by the absent recognizer port/assets documented in `evidence.md`.
 
-- [ ] 11.1 Implement the SDK key handler on the thread (and Sessions): claim `WHEEL_CCW`, `WHEEL_CW`, `WHEEL_CLICK`, `FOCUS`, `CAMERA` on DOWN and UP, return true, and feed them into one `WheelTalk` instance hoisted in the screen's view model so holds survive recomposition.
+- [x] 11.1 Implement the SDK key handler on the thread (and Sessions): claim `WHEEL_CCW`, `WHEEL_CW`, `WHEEL_CLICK`, `FOCUS`, `CAMERA` on DOWN and UP, return true, and feed them into one `WheelTalk` instance hoisted in the screen's view model so holds survive recomposition.
 - [ ] 11.2 Wire the three actions: click = send composed text / stop running turn; hold = start take, release = submit stitched transcript via `prompt.submit`; turn while held = cancel take; bare turn = scroll the thread.
-- [ ] 11.3 Request `RECORD_AUDIO` on first voice use; on denial show one line naming LightOS Settings; never capture before the grant.
+- [x] 11.3 Request `RECORD_AUDIO` on first voice use; on denial show one line naming LightOS Settings; never capture before the grant.
 - [ ] 11.4 Diagnostics readout (long-press the thread status line): clicks seen, turns seen, mic granted, whether BrightControl is installed, and one suggested fix line when clicks are zero.
-- [ ] 11.5 Unit tests: click vs hold split at HOLD_MS, turn-while-held cancels, key handler claims only the wheel keys and passes Back/Home through.
-- [ ] 11.6 Document in AGENTS.md and the release notes: BrightControl's per-app rule for `dev.loosewire.hermeslight` must be **Off** (hands-off) so the click and camera reach the app; `com.thelightphone.*` and `com.gios.*` are hands-off by default, ours is not.
+- [x] 11.5 Unit tests: click vs hold split at HOLD_MS, turn-while-held cancels, key handler claims only the wheel keys and passes Back/Home through.
+- [x] 11.6 Document in AGENTS.md and the release notes: BrightControl's per-app rule for `dev.loosewire.hermeslight` must be **Off** (hands-off) so the click and camera reach the app; `com.thelightphone.*` and `com.gios.*` are hands-off by default, ours is not.
 
 ## 12. Menu page v2 (owner request: back, but filled out)
 
 - [ ] 12.1 Home top bar: single **Menu** action (History/Bots actions removed).
 - [ ] 12.2 Menu page: status block (connected + model + session count), rows History / Bots / Cron / Settings / About, each with a live count where one exists (`Cron · 0 jobs`), Light row style.
 - [ ] 12.3 Menu lists the three most recent sessions below the rows; each opens its thread; Back walks Thread → Sessions → Menu → Home.
-- [ ] 12.4 Version bump to 0.2.1 (code 105) and gates green.
+- [x] 12.4 Version bump to 0.2.1 (code 105) and gates green.
+
+Implementation (2026-11-27): 11.4 and 12.1–12.3 are wired but retain their visual acceptance
+boxes: this run must not use adb/emulator. Thread click sends the draft/stops the run, decisions
+remain wheel-actionable, and bare turns scroll. 11.2 is incomplete: this checkout has no Listener,
+sherpa-onnx dependency or Parakeet assets; a granted hold says so and captures/sends nothing.
+No server-side audio upload was substituted for the on-device pipeline.
 
 ## 13. Voice engine (owner report: "there is no voice engine")
 

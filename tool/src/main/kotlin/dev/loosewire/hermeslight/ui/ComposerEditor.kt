@@ -29,9 +29,13 @@ fun ComposerEditor(
     }
     BindScreenWheel(
         onClick = {
-            submitted[0] = true
-            actions.onSubmit(text.text.toString())
-            onClose()
+            if (state.running) {
+                actions.onAction("stop")
+            } else {
+                submitted[0] = true
+                actions.onSubmit(text.text.toString())
+                onClose()
+            }
         },
         onHoldStart = actions.onHoldStart,
         onHoldEnd = actions.onHoldEnd,
