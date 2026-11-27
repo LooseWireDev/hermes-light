@@ -51,11 +51,11 @@ search, long-press menus, kanban/files/cron admin.
 
 ## 6. M0.1 — review fixes and the menu page
 
-- [ ] 6.1 Add `Route.Menu` + `MenuScreen` (full page, Light rows, title bar with Back): Chat / History / Bots / Cron (disabled "arrives with live tiles") / Settings. Home gets a Menu action in its top bar; wheel-up past the deck opens Menu instead of Sessions. Back chain: Thread → Sessions → Menu → Home.
+- [x] 6.1 Add `Route.Menu` + `MenuScreen` (full page, Light rows, title bar with Back): Chat / History / Bots / Cron (disabled "arrives with live tiles") / Settings. Home gets a Menu action in its top bar; wheel-up past the deck opens Menu instead of Sessions. Back chain: Thread → Sessions → Menu → Home.
 - [x] 6.2 Setup: the endpoint hint must not look like a saved value — render it as placeholder styling until the user saves, or seed state with the default; first Test connection must not fail with "address is required" on an untouched form.
 - [x] 6.3 Tool one-liners: show the tool name and outcome (`· read_file — ok`) instead of raw `call_*` ids; fall back to the id only when no name exists.
-- [ ] 6.4 Contrast: raise secondary text (timestamps, labels, status) to the next LightThemeTokens step; verify legibility on the AVD screenshot.
-- [ ] 6.5 Unit tests for menu routing (back stack) and the endpoint placeholder rule; gates green; device screenshots of Menu + back chain appended to evidence.md.
+- [x] 6.4 Contrast: raise secondary text (timestamps, labels, status) to the next LightThemeTokens step; verify legibility on the AVD screenshot.
+- [x] 6.5 Unit tests for menu routing (back stack) and the endpoint placeholder rule; gates green; device screenshots of Menu + back chain appended to evidence.md.
 
 6.1–6.4 are implemented; 6.5's unit tests and local gates are green (61 tests). No adb/emulator
 driving was authorized for this task. Visual acceptance for Menu/back/remembered scroll and the

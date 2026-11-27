@@ -78,3 +78,18 @@ Verification after the final code edit:
 
 No adb, emulator driving, screenshots, device install or live-dashboard check performed, as requested.
 Parent still owns LP3-shaped Menu/back/scroll and contrast acceptance; visual boxes remain unchecked.
+
+## 2026-11-26 — M0.1 device acceptance (menu page + fixes)
+
+Screenshots in `~/Projects/light/hermes-light-audit/` (private).
+
+- Menu action present on Home; opens the full-page Menu (Chat / History / Bots / Cron / Settings),
+  Cron disabled with "arrives with live tiles", status line persists.
+- Back chain exercised end to end: Thread → Sessions → Menu → Home.
+- Tool one-liners now render names and outcomes (`· web_search — ok`) instead of `call_*` ids.
+- Gates green (ktlint, color guard, unit tests incl. new menu-routing tests, assembleDebug).
+
+New defect found: with a **stale remembered session id** at cold start, the app surfaces a raw
+"load failed … Not found on the dashboard (HTTP 404)" hint at the top of Sessions (the dashboard
+answers 200 for every live endpoint; the 404 is the remembered session itself). Fix: on 404 for a
+remembered session, clear the selection and land on Sessions silently. Fold into M1.
