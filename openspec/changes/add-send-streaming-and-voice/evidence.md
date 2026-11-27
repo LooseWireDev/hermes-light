@@ -102,3 +102,18 @@ The release is unsigned; the parent signs/publishes only after acceptance. No ad
 screenshots, live dashboard, phone install, release signing, upload or push was performed.
 Visual boxes, full voice tasks and parent publication remain unchecked. This is a verified local
 build of the reachable work, not a claim that M1 or alpha4 is fully accepted.
+
+## 2026-11-27 — M1 device acceptance, part 1 (send path)
+
+Signed 0.2.0 (code 103) on the LP3 AVD against the loopback dashboard.
+
+Working: composer opens the SDK editor, SEND submits, and the failure path is honest — the dashboard's
+rejection rendered as an ERROR row with `· Retry` and the draft was restored (`· Draft: M1`). Nothing
+was shown as delivered. Voice surfaces exist and report `Microphone permission not granted` truthfully.
+
+Defect (blocks send): `prompt.submit` was rejected with `code 4001: session not found` — the app
+submits the **stored** session id, but a turn needs the session's current/runtime id. Reference
+client resolves it with `GET api/sessions/{id}/latest-descendant` and URL-encodes ids (they may
+contain `/`). Fix in M1.1: resolve descendant before submit, cache, re-resolve once on 4001, and
+audit all session-id path encoding. Streaming and approvals remain unverified until a submit is
+accepted.
