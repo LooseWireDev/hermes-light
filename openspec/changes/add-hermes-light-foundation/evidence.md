@@ -115,3 +115,14 @@ Verification after the final code edit, with the requested Android/JDK environme
 The initial run found only ktlint filename/chain formatting issues; fixed before the successful
 run. Existing SDK publication and AGP compile-SDK-37 warnings remain. Debug artifact:
 `tool/build/outputs/apk/debug/tool-debug.apk`.
+
+## 2026-11-26 — M0.2 device acceptance (paste)
+
+Verified on the LP3 AVD with the signed 0.1.1 (code 101) release build. The emulator has no
+`cmd clipboard`, so the clipboard was seeded from a real EditText (WebView address bar, select-all +
+copy) — the same path Bitwarden's Copy takes.
+
+- `Paste Server` inserted the clipboard text verbatim into the Server field.
+- `Paste Token` masked the value (32 dots for a 32-character clipboard string) and kept the value
+  usable for Test/Sign in.
+- Hint line "Copied a password from Bitwarden? Use Paste." renders under the credential rows.
