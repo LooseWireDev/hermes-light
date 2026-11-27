@@ -1,7 +1,7 @@
 [tool]
 id = "dev.loosewire.hermeslight"
 label = "Hermes Light"
-versionCode = 1
+versionCode = 100
 versionName = "0.1.0"
 permissions = ["android.permission.INTERNET"]
 capabilities = ["cleartext-http"]

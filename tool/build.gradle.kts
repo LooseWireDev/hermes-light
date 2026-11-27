@@ -35,6 +35,11 @@ android {
         debug {
             signingConfig = signingConfigs.getByName("hermesDev")
         }
+        release {
+            // Alpha builds are signed locally with the dev key (apksigner, v2-only) and the private
+            // key never leaves the owner's machine. No minification for the alpha track.
+            isMinifyEnabled = false
+        }
     }
     defaultConfig {
         minSdk = rootProject.ext["minSdk"] as Int
