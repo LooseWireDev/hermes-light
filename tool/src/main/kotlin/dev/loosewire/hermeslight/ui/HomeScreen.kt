@@ -17,6 +17,7 @@ import com.thelightphone.sdk.ui.LightThemeTokens
 import com.thelightphone.sdk.ui.LightTopBar
 import com.thelightphone.sdk.ui.LightTopBarCenter
 import com.thelightphone.sdk.ui.gridUnitsAsDp
+import dev.loosewire.hermeslight.ui.common.HintLine
 import dev.loosewire.hermeslight.ui.common.StatusLine
 import dev.loosewire.hermeslight.ui.common.ThreadView
 import dev.loosewire.hermeslight.ui.common.WheelScroll
@@ -81,6 +82,9 @@ fun HomeScreen(
         },
         onBack = actions.onBack,
         onLongBack = actions.onLongBack,
+        onHoldStart = actions.threadActions.onHoldStart,
+        onHoldEnd = actions.threadActions.onHoldEnd,
+        onHoldCancel = actions.threadActions.onHoldCancel,
     ) {
         Column(
             modifier =
@@ -116,6 +120,7 @@ fun HomeScreen(
                         .padding(horizontal = 0.3f.gridUnitsAsDp()),
                 showFocus = wheelFocus == HomeWheelFocus.Thread,
             )
+            thread.voiceFeedback?.let { HintLine(it) }
             StatusLine(status = thread.status)
         }
     }

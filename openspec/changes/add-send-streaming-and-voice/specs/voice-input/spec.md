@@ -2,62 +2,69 @@
 
 ## Purpose
 
-Hold the wheel, talk for as long as the thought takes, let go, and have it sent — outdoors, in
-sunlight, without typing. Long-form dictation is a first-class input in Hermes Light, not a shortcut.
+Hold the wheel, speak, release once. M1.4 uses dashboard transcription because LightOS has no
+system speech recognizer; it supersedes the earlier unbounded/on-device assumptions.
 
 ## ADDED Requirements
 
 ### Requirement: Hold-to-talk on the wheel
 
-Holding the wheel (or the on-screen push-to-talk line) SHALL start capture; releasing SHALL finish
-capture and hand the transcript to the send path; during capture, turning the wheel SHALL cancel and
-discard the take. While listening, the panel MUST visibly invert (light background, dark text) so the
-state reads in direct sunlight, and the captured text MUST be sent without requiring a second press.
+Holding the wheel SHALL start microphone capture after the SDK grants permission. Releasing
+SHALL commit once and drain the final window. Home and Thread SHALL append the result to the
+composer without sending. Inside the composer editor, release SHALL be an explicit send-and-close
+gesture using the typed submit/queue path. Turning while held SHALL cancel and discard the take.
 
 #### Scenario: Long thought, one take
 
 - **WHEN** the user holds the wheel for several minutes without pausing
-- **THEN** one transcript is produced and sent on release, with no truncation and no duplicated words at decode-window seams
+- **THEN** one stitched transcript is produced only after release; no partial result is committed
 
 #### Scenario: Cancel mid-sentence
 
 - **WHEN** the user turns the wheel while still holding
 - **THEN** capture stops, the text is discarded, nothing is sent, and the panel returns to its normal state
 
-### Requirement: Chunked, unbounded transcription
+### Requirement: Bounded windowed dashboard transcription
 
-Transcription SHALL decode successive overlapping windows of the take and stitch them by matching
-word anchors (the `DictationTake` approach from BrightHermes), so recording length is bounded only by
-patience, not memory or a recognizer session limit. The live preview during capture MUST stay bounded
-(a short tail), never rendering the whole take.
+Capture SHALL use AudioRecord VOICE_RECOGNITION, 16 kHz mono PCM16. Each required DictationTake
+window SHALL be encoded as WAV with a 44-byte header and POSTed to `api/audio/transcribe` as
+`{data_url, mime_type}` using the current dashboard authentication. Windowing SHALL retain the
+28-second input, 24-second stride, 56-second backlog and 300-second cap. Reaching the cap SHALL NOT
+authorize an early result. Text-only transcripts SHALL use conservative overlap anchors without
+inventing timestamps; ambiguous or missing anchors SHALL discard the take, not guess a seam.
 
-#### Scenario: Ten-minute take
+#### Scenario: Three overlapping windows
 
-- **WHEN** a take exceeds several decode windows
-- **THEN** the stitched transcript is continuous (no repeated boundary words, no gaps), and memory use stays flat as the take grows
+- **WHEN** three windows have reconcilable overlap words
+- **THEN** their text is stitched without duplicate seams and exactly one final result is emitted
 
-#### Scenario: Recognizer drops a window
+#### Scenario: Window fails
 
-- **WHEN** a window fails to decode
-- **THEN** the take continues, the failed window is skipped in the preview, and the final transcript reports itself without inventing text
+- **WHEN** capture, transcription or required overlap reconciliation fails
+- **THEN** the whole take is discarded, no partial draft or message is committed, and the UI says `transcription needs the dashboard`
+
+#### Scenario: Empty transcript
+
+- **WHEN** the dashboard returns empty text for the take
+- **THEN** the UI says `no speech`; nothing is sent and the editor stays open
 
 ### Requirement: Voice never regresses
 
-Every screen that accepts text SHALL support hold-to-talk, including the thread while a reply is
-streaming. A layout change or new feature MUST NOT disable the wheel-hold gesture or the send-on-release
-behaviour.
+Home, Thread and the composer editor SHALL support hold-to-talk, including while a reply streams.
+The UI SHALL say `listening` while held and `transcribing…` after release until a final result.
+Navigation, backgrounding, session/profile replacement and editor close SHALL invalidate late work.
 
 #### Scenario: Streaming reply, user holds wheel
 
 - **WHEN** a reply is still streaming and the user holds the wheel and speaks
-- **THEN** dictation starts, and on release the message is queued through the same path the text composer uses
+- **THEN** dictation starts; editor send-and-close queues through the same path as typed text, while ordinary release only edits the draft
 
 ### Requirement: Honest voice failures
 
-Missing microphone permission, recognizer unavailability and decode failures SHALL be visible on
-screen as specific lines with a retry affordance, never silently dropped audio.
+Missing microphone permission SHALL name LightOS Settings. A failed capture or dashboard request
+SHALL display `transcription needs the dashboard` and never submit text from the discarded take.
 
 #### Scenario: Permission denied
 
 - **WHEN** microphone permission is refused
-- **THEN** the push-to-talk line says so and offers to open settings; no empty message is sent
+- **THEN** the UI names LightOS Settings and captures/sends nothing; a later grant requires a new hold

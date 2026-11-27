@@ -317,3 +317,50 @@ Signed 0.2.1 (code 105) on the LP3 AVD, loopback dashboard, BrightControl not in
   voice produced no engine — see task group 13.
 - Defect (cosmetic): the status block reads `Model unavailable` when no session is open; it should
   name the model when known and stay quiet otherwise.
+
+## 2026-11-27 — task group 13: M1.4 dashboard voice engine
+
+- The owner selected server-backed recognition. AudioRecord captures VOICE_RECOGNITION,
+  16 kHz mono PCM16; required DictationTake windows become 44-byte-header WAV data URLs and
+  POST to `api/audio/transcribe`. The existing bearer-token provider/shared password-session
+  cookie jar authenticates the requests. No native model, dependency or ABI restriction added.
+- The dashboard returns plain text, not word timestamps. The original timestamped anchor path
+  remains; text-only completion uses conservative overlap anchors. Missing/ambiguous seams fail
+  the whole take rather than fabricate timestamps or silently duplicate/delete words.
+  The existing 28-second windows, 24-second stride, 56-second backlog and 300-second cap remain.
+- Release commits once. UI state is `listening` while held, `transcribing…` after release,
+  `no speech` for empty results, and exactly `transcription needs the dashboard` for failed
+  takes. No partial transcript is committed. Home/Thread release appends to the composer;
+  editor release explicitly sends-and-closes through the existing submit/queue path.
+  Cancel, screen hide/background, editor close and session/profile replacement discard work;
+  late permission checks cannot start capture after the gesture ends.
+- Metadata: **106 / 0.2.2**. The active change's `design.md` records the future sherpa-onnx /
+  Parakeet option: arm64-only AAR, approximately 120 MB model, unavailable on x86_64 emulators.
+  Historical SpeechRecognizer/unbounded assumptions are superseded, not advertised as shipped.
+- Local/development lane, unchanged owner SDK `main` at
+  `251237ef3778c907c5dbd89e84685532c9d99a28`; existing SDK edits left untouched.
+  No adb/emulator, live audio/dashboard, install, signing, upload or push. Actual microphone,
+  live transcription and LP3 visual/hardware acceptance remain unverified by explicit request.
+  Accepted specs are not synced. Canonical Obsidian vault is still unavailable: Home.md and
+  Projects/Projects.md were not found under `/home/gav/Documents/obsidian-vault`; this evidence
+  retains the durable project update instead.
+
+### Verification after the last code edit
+
+With the requested Android SDK, JDK 21 on PATH and both Java installation paths:
+
+```sh
+./gradlew -Porg.gradle.java.installations.paths="$HOME/.local/share/light-tern-toolchain/jdk17,$HOME/.local/opt/temurin21" ktlintCheck checkColorLiterals :tool:testDebugUnitTest :tool:assembleDebug --continue --console=plain
+```
+
+**BUILD SUCCESSFUL in 10s; 196 tests across 23 files, zero failures/errors/skips.**
+The initial gate run passed unit tests and assembly but found ktlint wrapping; the final
+four-gate run passed after those formatting-only corrections. Added coverage includes WAV
+header/PCM lengths and byte order, data URL round-trip, proxy-prefixed bearer and cookie auth,
+empty/malformed/failed transcription responses, exactly three overlapping text windows,
+ambiguous/missing anchors, release-once, cancellation/restart, empty audio and empty transcript,
+failed later windows without partial commits, and bounded-backlog overflow.
+
+Artifact: `tool/build/outputs/apk/debug/tool-debug.apk`. No new runtime dependency/model.
+Existing SDK publication/compile-SDK warnings remain; the JVM fake microphone's monitor also
+produces Kotlin's Java-Object style warning. No runtime/visual acceptance or vault update claimed.

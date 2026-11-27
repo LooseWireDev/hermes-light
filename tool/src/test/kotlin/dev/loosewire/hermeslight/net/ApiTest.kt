@@ -6,6 +6,8 @@
 package dev.loosewire.hermeslight.net
 
 import kotlinx.coroutines.runBlocking
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import java.util.Collections
 import java.util.concurrent.atomic.AtomicInteger
 import kotlin.test.Test
@@ -15,6 +17,74 @@ import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class ApiTest {
+    @Test
+    fun `audio transcription posts WAV data with proxy prefix and bearer auth`() =
+        runBlocking {
+            val dataUrl = "data:audio/wav;base64,UklGRg=="
+            TestHttpServer { exchange ->
+                assertEquals("/dash/api/audio/transcribe", exchange.requestURI.path)
+                assertEquals("Bearer voice-token", exchange.requestHeaders.getFirst("Authorization"))
+                val contentType = exchange.requestHeaders.getFirst("Content-Type").orEmpty()
+                assertTrue(contentType.startsWith("application/json"))
+                val payload = hermesJson.parseToJsonElement(exchange.bodyText()).jsonObject
+                assertEquals(dataUrl, payload["data_url"]?.jsonPrimitive?.content)
+                assertEquals("audio/wav", payload["mime_type"]?.jsonPrimitive?.content)
+                exchange.respondJson(200, """{"transcript":" hello world ","extra":true}""")
+            }.use { server ->
+                val api = Api(newHttpClient(), tokenProvider = { "voice-token" })
+                assertEquals("hello world", api.transcribe(Endpoint.parse("${server.baseUrl}dash/"), dataUrl))
+            }
+        }
+
+    @Test
+    fun `audio transcription shares password session cookie and accepts empty speech`() =
+        runBlocking {
+            TestHttpServer { exchange ->
+                if (exchange.requestURI.path == "/api/cron/jobs") {
+                    exchange.respondJson(200, "[]", mapOf("Set-Cookie" to "hermes_session=voice-session; Path=/; HttpOnly"))
+                } else {
+                    assertEquals("hermes_session=voice-session", exchange.requestHeaders.getFirst("Cookie"))
+                    assertNull(exchange.requestHeaders.getFirst("Authorization"))
+                    exchange.respondJson(200, """{"transcript":""}""")
+                }
+            }.use { server ->
+                val api = Api(newHttpClient())
+                val endpoint = Endpoint.parse(server.baseUrl)
+                api.cronJobs(endpoint)
+                assertEquals("", api.transcribe(endpoint, "data:audio/wav;base64,UklGRg=="))
+            }
+        }
+
+    @Test
+    fun `audio transcription rejects failed and malformed responses instead of treating them as silence`() =
+        runBlocking {
+            val cases =
+                listOf(
+                    Triple(503, "{}", ApiErrorKind.HTTP),
+                    Triple(401, "{}", ApiErrorKind.UNAUTHORIZED),
+                    Triple(200, "{}", ApiErrorKind.INVALID_RESPONSE),
+                    Triple(200, """{"transcript":null}""", ApiErrorKind.INVALID_RESPONSE),
+                )
+            for ((status, body, kind) in cases) {
+                TestHttpServer { it.respondJson(status, body) }.use { server ->
+                    val api = Api(newHttpClient())
+                    val failure =
+                        assertFailsWith<ApiException> {
+                            api.transcribe(Endpoint.parse(server.baseUrl), "data:audio/wav;base64,UklGRg==")
+                        }
+                    assertEquals(kind, failure.kind)
+                }
+            }
+            val server = TestHttpServer { it.respondEmpty(503) }
+            val endpoint = Endpoint.parse(server.baseUrl)
+            server.close()
+            val failure =
+                assertFailsWith<ApiException> {
+                    Api(newHttpClient()).transcribe(endpoint, "data:audio/wav;base64,UklGRg==")
+                }
+            assertEquals(ApiErrorKind.NETWORK, failure.kind)
+        }
+
     @Test
     fun `cron menu snapshot preserves proxy prefix profile and authentication`() =
         runBlocking {

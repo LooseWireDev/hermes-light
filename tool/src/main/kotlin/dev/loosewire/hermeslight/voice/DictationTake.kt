@@ -3,7 +3,9 @@
  *
  * Ported from BrightHermes (owner):
  * app/src/main/kotlin/com/gios/brighthermes/voice/DictationTake.kt.
- * Behaviour is unchanged. See NOTICE.
+ * Timestamped window stitching is unchanged. Dashboard responses carry text only, so that
+ * path reconciles each audio overlap from normalized word suffixes and prefixes instead.
+ * See NOTICE.
  */
 package dev.loosewire.hermeslight.voice
 
@@ -41,6 +43,7 @@ internal class DictationTake(
     private var finished = false
     private val text = StringBuilder()
     private val stitcher = Stitcher(sampleRate)
+    private val textStitcher = TextStitcher()
 
     val remaining: Int
         @Synchronized get() = minOf(samples.size - count, sampleRate * 300 - total)
@@ -127,6 +130,35 @@ internal class DictationTake(
             return null
         }
         val decoded = stitcher.text(tokens, timestamps, window.start, window.lower, window.upper, window.required)
+        return settle(window, decoded)
+    }
+
+    /**
+     * Completes a dashboard window that returned text without word timestamps.
+     *
+     * Required windows are rejoined through a normalized word suffix/prefix anchor. A missing or
+     * ambiguous anchor throws instead of guessing; silence (empty text) commits nothing. The final
+     * result is sent once, and only when the take contains nonempty committed text.
+     */
+    @Synchronized
+    fun complete(
+        window: Window,
+        transcript: String,
+    ): Result? {
+        if (finished || (stopped && !committed)) {
+            cancel()
+            return null
+        }
+        if (!window.required) {
+            return settle(window, textStitcher.preview(transcript))
+        }
+        return settle(window, textStitcher.text(transcript))
+    }
+
+    private fun settle(
+        window: Window,
+        decoded: String,
+    ): Result {
         busy = false
         if (!window.required) return Result(join(text.toString(), decoded), false)
         if (decoded.isNotEmpty()) {
@@ -158,6 +190,107 @@ internal class DictationTake(
             a
         } else {
             "$a $b"
+        }
+    }
+
+    /**
+     * Text-only seams for dashboard responses, which carry no word timestamps.
+     *
+     * The audio overlap is known, but word times are not, so each new transcript's duplicate
+     * prefix is matched against the normalized words of the immediately preceding window. Earlier
+     * windows cannot supply a spurious anchor. Words are emitted with their original spelling and
+     * punctuation and repeats inside a single window are never collapsed.
+     *
+     * Text cannot distinguish two possible overlap lengths when the words repeat across the seam.
+     * In that case (more than one suffix/prefix length matches), and when a nonempty previous
+     * window has no overlap at all, required work throws rather than guessing. A silent (empty)
+     * window clears the anchor because only its speechless audio overlaps the next window.
+     */
+    internal class TextStitcher {
+        private data class Word(
+            val text: String,
+            val key: String,
+        )
+
+        private var anchor: List<String> = emptyList()
+
+        fun text(transcript: String): String {
+            val words = wordsOf(transcript)
+            if (words.isEmpty()) {
+                anchor = emptyList()
+                return ""
+            }
+            val from = seam(anchor, words)
+            anchor = words.map { it.key }
+            return join(words, from)
+        }
+
+        fun preview(transcript: String): String {
+            val words = wordsOf(transcript)
+            if (words.isEmpty()) return ""
+            val from =
+                try {
+                    seam(anchor, words)
+                } catch (_: IllegalStateException) {
+                    // A preview is cosmetic; only required completions may abort the take.
+                    0
+                }
+            return join(words, from)
+        }
+
+        private fun seam(
+            previous: List<String>,
+            next: List<Word>,
+        ): Int {
+            if (previous.isEmpty()) return 0
+            var match = -1
+            for (length in 1..minOf(previous.size, next.size)) {
+                if (!matches(previous, next, length)) continue
+                check(match < 0) { "Ambiguous repeated speech at overlap" }
+                match = length
+            }
+            check(match >= 0) { "Cannot reconcile speech overlap" }
+            return match
+        }
+
+        private fun matches(
+            previous: List<String>,
+            next: List<Word>,
+            length: Int,
+        ): Boolean {
+            val offset = previous.size - length
+            for (i in 0 until length) {
+                if (previous[offset + i] != next[i].key) return false
+            }
+            return true
+        }
+
+        private fun wordsOf(source: String): List<Word> {
+            if (source.isBlank()) return emptyList()
+            return source
+                .trim()
+                .split(WHITESPACE)
+                .map { token ->
+                    Word(token, token.trim { !it.isLetterOrDigit() }.lowercase().ifEmpty { token.lowercase() })
+                }
+        }
+
+        private fun join(
+            words: List<Word>,
+            from: Int,
+        ): String {
+            if (from >= words.size) return ""
+            if (from == words.size - 1) return words[from].text
+            val out = StringBuilder()
+            for (i in from until words.size) {
+                if (out.isNotEmpty()) out.append(' ')
+                out.append(words[i].text)
+            }
+            return out.toString()
+        }
+
+        private companion object {
+            private val WHITESPACE = Regex("\\s+")
         }
     }
 

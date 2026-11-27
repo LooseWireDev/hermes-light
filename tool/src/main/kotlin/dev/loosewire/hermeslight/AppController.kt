@@ -23,6 +23,8 @@ import dev.loosewire.hermeslight.net.TicketResult
 import dev.loosewire.hermeslight.net.WsAuthParam
 import dev.loosewire.hermeslight.net.defaultHttpClient
 import dev.loosewire.hermeslight.ui.DEFAULT_ENDPOINT
+import dev.loosewire.hermeslight.voice.Listener
+import dev.loosewire.hermeslight.voice.WavAudio
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
@@ -88,6 +90,7 @@ internal data class AppState(
     val desktopNotices: Map<String, List<DesktopNotice>> = emptyMap(),
     val conversations: Map<String, Conversation> = emptyMap(),
     val sessionsRequired: Boolean = false,
+    val voiceFeedback: String? = null,
 )
 
 /** One foreground connection owner shared by the SDK screen stack. No network work in Compose. */
@@ -120,6 +123,8 @@ internal class AppController(
     private val auth = Auth(client)
     private val saveMutex = Mutex()
     private var handshake: CompletableDeferred<Unit>? = null
+    private var voice: Listener? = null
+    private var voiceAfterResult: (() -> Unit)? = null
     private val gateway =
         Gateway(
             scope,
@@ -192,6 +197,7 @@ internal class AppController(
     }
 
     fun pause() {
+        cancelVoice()
         foreground = false
         connectionJob?.cancel()
         sessionsJob?.cancel()
@@ -220,6 +226,7 @@ internal class AppController(
         username: String,
         passwordMode: Boolean,
     ) {
+        cancelVoice()
         connectionJob?.cancel()
         sessionsJob?.cancel()
         threadJob?.cancel()
@@ -493,6 +500,7 @@ internal class AppController(
         id: String,
         remembered: Boolean = false,
     ) {
+        cancelVoice()
         val saved = profile ?: return
         val runtime = sessionRuntime
         threadJob?.cancel()
@@ -644,6 +652,7 @@ internal class AppController(
     }
 
     fun selectBot(source: String?) {
+        cancelVoice()
         threadJob?.cancel()
         persist { it.copy(botProfile = source, selectedSessionId = null) }
         mutable.update {
@@ -704,6 +713,64 @@ internal class AppController(
 
     fun sessionsShown() {
         mutable.update { it.copy(sessionsRequired = false) }
+    }
+
+    fun voicePermissionDenied() {
+        mutable.update { it.copy(voiceFeedback = "Microphone permission not granted — enable in LightOS Settings") }
+    }
+
+    fun startVoice() {
+        cancelVoice()
+        val saved = profile
+        val session = mutable.value.selectedSession
+        if (saved == null || session == null) {
+            mutable.update { it.copy(voiceFeedback = "transcription needs the dashboard") }
+            return
+        }
+        val endpoint = Endpoint.parse(saved.endpoint)
+        voice =
+            Listener(
+                scope = scope,
+                transcribe = { pcm -> api.transcribe(endpoint, WavAudio.dataUrl(pcm)) },
+                onState = { state ->
+                    val line =
+                        when (state) {
+                            Listener.State.Idle -> null
+                            Listener.State.Listening -> "listening"
+                            Listener.State.Transcribing -> "transcribing…"
+                            Listener.State.NoSpeech -> "no speech"
+                            Listener.State.Error -> "transcription needs the dashboard"
+                        }
+                    mutable.update { it.copy(voiceFeedback = line) }
+                },
+                onResult = { transcript ->
+                    val previous =
+                        mutable.value.conversations[session]
+                            ?.composer
+                            .orEmpty()
+                    val text = if (previous.isBlank()) transcript else "${previous.trimEnd()} $transcript"
+                    editDraft(session, text)
+                    val after = voiceAfterResult
+                    voiceAfterResult = null
+                    if (after != null) {
+                        submit(session, text)
+                        after()
+                    }
+                },
+            ).also { it.start() }
+    }
+
+    /** Ordinary release inserts into the draft; the editor explicitly opts into send-and-close. */
+    fun releaseVoice(afterSend: (() -> Unit)? = null) {
+        voiceAfterResult = afterSend
+        voice?.release()
+    }
+
+    fun cancelVoice() {
+        voiceAfterResult = null
+        voice?.cancel()
+        voice = null
+        mutable.update { it.copy(voiceFeedback = null) }
     }
 
     fun editDraft(

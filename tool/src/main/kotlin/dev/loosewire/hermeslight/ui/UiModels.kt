@@ -177,6 +177,7 @@ data class ThreadActions(
     val onAction: (String) -> Unit = {},
     val onHoldStart: () -> Unit = {},
     val onHoldEnd: () -> Unit = {},
+    val onHoldSendAndClose: (onSent: () -> Unit) -> Unit = {},
     val onHoldCancel: () -> Unit = {},
     val onDiagnostics: () -> Unit = {},
 )

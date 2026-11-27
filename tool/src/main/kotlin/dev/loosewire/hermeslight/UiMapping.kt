@@ -174,5 +174,6 @@ internal fun AppState.threadUi(): ThreadUi {
         status = statusUi(),
         composer = conversation.composer,
         running = conversation.running,
+        voiceFeedback = voiceFeedback,
     )
 }

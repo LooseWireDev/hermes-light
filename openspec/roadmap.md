@@ -12,10 +12,11 @@ deck arrive later; M0 proves the data plane and the wheel.
 ## M1 — Thread that behaves
 
 Send, streaming render, tool one-liners, reasoning collapse, approvals and clarify as blocking
-Light-native rows, queue/stop, reconnect honesty. **Hold-wheel voice with send** (owner uses it
-outdoors): the BrightHermes pipeline is ported verbatim — `WheelTalk` hold/release/turn-to-cancel,
-`DictationTake` overlapping-window decoding with word-anchor stitching for unbounded recording
-length, `Listener` bounded previews — so long dictation never truncates.
+Light-native rows, queue/stop, reconnect honesty. M1.4 uses dashboard-backed voice: `WheelTalk`
+hold/release/turn-to-cancel, `DictationTake` overlapping windows with conservative word-anchor
+stitching, and `Listener` AudioRecord capture. The existing 300-second cap remains. Home/Thread
+release inserts a draft; editor release explicitly sends-and-closes. On-device recognition is
+future work (arm64-only sherpa-onnx and approximately 120 MB Parakeet model).
 
 ## M2 — Deck that earns its keep
 

@@ -22,8 +22,12 @@ import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
+import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
 import java.io.IOException
 
 @Serializable
@@ -52,7 +56,7 @@ class ApiException(
 ) : Exception(message, cause)
 
 /**
- * Read-only dashboard REST for the sessions family.
+ * Dashboard REST for sessions, menu snapshots and voice transcription.
  *
  * Loopback token mode authenticates REST with `Authorization: Bearer <token>` (the dashboard
  * rejects a cookie-only request there); gated password mode passes no bearer token and relies on
@@ -63,6 +67,40 @@ class Api(
     private val json: Json = hermesJson,
     private val tokenProvider: () -> String? = { null },
 ) {
+    /** Empty speech is a successful empty transcript; malformed text is a wire failure. */
+    suspend fun transcribe(
+        endpoint: Endpoint,
+        dataUrl: String,
+    ): String {
+        val payload =
+            buildJsonObject {
+                put("data_url", dataUrl)
+                put("mime_type", "audio/wav")
+            }.toString()
+        val builder =
+            Request
+                .Builder()
+                .url(endpoint.resolve("api/audio/transcribe"))
+                .header("Accept", "application/json")
+                .post(payload.toRequestBody("application/json".toMediaType()))
+        tokenProvider()?.takeIf { it.isNotBlank() }?.let { token ->
+            builder.header("Authorization", "Bearer $token")
+        }
+        try {
+            client.newCall(builder.build()).awaitResponse().use { response ->
+                val body = response.readBody()
+                if (!response.isSuccessful) throw httpError(response.code)
+                return decode<AudioTranscriptWire>(body).transcript.trim()
+            }
+        } catch (exception: IOException) {
+            throw ApiException(
+                message = "Dashboard unreachable — check address",
+                kind = ApiErrorKind.NETWORK,
+                cause = exception,
+            )
+        }
+    }
+
     /** Read-only menu snapshot; zero is shown only after a successful jobs response. */
     suspend fun cronJobs(
         endpoint: Endpoint,
@@ -421,6 +459,11 @@ class Api(
         private const val AROUND_SYNTHETIC_BASE: Long = 1_000_000_000L
     }
 }
+
+@Serializable
+private data class AudioTranscriptWire(
+    val transcript: String,
+)
 
 @Serializable
 private data class LatestDescendantWire(

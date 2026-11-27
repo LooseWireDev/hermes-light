@@ -2,6 +2,7 @@ package dev.loosewire.hermeslight
 
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -81,7 +82,15 @@ class MainActivity(
         controller.refreshReadPosition()
     }
 
-    override fun onAppPause() = controller.pause()
+    override fun willHide() {
+        voice.gesture++
+        controller.cancelVoice()
+    }
+
+    override fun onAppPause() {
+        voice.gesture++
+        controller.pause()
+    }
 
     override fun onScreenDestroy() = controller.close()
 
@@ -99,7 +108,7 @@ private class PositionCapture(
 /** Shared across the screen stack: a denied grant must not reopen the sheet on every hold. */
 private class VoiceAccessState {
     var requested = false
-    var feedback by mutableStateOf<String?>(null)
+    var gesture = 0
     var diagnostics by mutableStateOf<String?>(null)
 }
 
@@ -123,10 +132,15 @@ private class DestinationScreen(
     }
 
     override fun willHide() {
+        voice.gesture++
+        controller.cancelVoice()
         if (route == Route.Menu) controller.menuHidden()
     }
 
-    override fun onAppPause() = controller.pause()
+    override fun onAppPause() {
+        voice.gesture++
+        controller.pause()
+    }
 
     @Composable
     override fun Content() = Surface(controller, route, position, viewModel, voice) { lightContext.appAccess.apps }
@@ -163,14 +177,14 @@ private fun SimpleLightScreen<Unit>.Surface(
     var composing by remember(state.selectedSession, state.profileVersion) { mutableStateOf(false) }
     val permissionLauncher = rememberRecordAudioPermissionLauncher()
     val scope = rememberCoroutineScope()
-    LaunchedEffect(position.shownRevision) {
-        if (voice.requested && hasRecordAudioPermission()) {
-            voice.feedback = "Voice unavailable — on-device recognizer is not packaged in this build"
+    DisposableEffect(state.selectedSession, state.profileVersion) {
+        onDispose {
+            voice.gesture++
+            controller.cancelVoice()
         }
     }
     val thread =
         state.threadUi().copy(
-            voiceFeedback = voice.feedback,
             wheelDiagnostics = voice.diagnostics,
         )
     LaunchedEffect(state.sessionsRequired) {
@@ -206,19 +220,33 @@ private fun SimpleLightScreen<Unit>.Surface(
                 }
             },
             onHoldStart = {
+                val gesture = ++voice.gesture
                 scope.launch {
-                    if (!hasRecordAudioPermission()) {
-                        voice.feedback = "Microphone permission not granted — enable in LightOS Settings"
+                    val granted = hasRecordAudioPermission()
+                    if (gesture != voice.gesture) return@launch
+                    if (!granted) {
+                        controller.voicePermissionDenied()
                         if (!voice.requested && permissionLauncher != null) {
                             voice.requested = true
                             permissionLauncher.launch()
                         }
                     } else {
-                        voice.feedback = "Voice unavailable — on-device recognizer is not packaged in this build"
+                        controller.startVoice()
                     }
                 }
             },
-            onHoldCancel = { voice.feedback = "Voice cancelled — nothing sent" },
+            onHoldEnd = {
+                voice.gesture++
+                controller.releaseVoice()
+            },
+            onHoldSendAndClose = { onSent ->
+                voice.gesture++
+                controller.releaseVoice(onSent)
+            },
+            onHoldCancel = {
+                voice.gesture++
+                controller.cancelVoice()
+            },
             onDiagnostics = diagnostics@{
                 if (voice.diagnostics != null) {
                     voice.diagnostics = null

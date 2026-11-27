@@ -145,9 +145,15 @@ fetched at build). Our M1 run ported only `DictationTake` (the stitcher) — **n
 exists, so a hold has nothing to run. The dashboard also exposes `POST /api/audio/transcribe`
 `{data_url, mime_type}` (base64 audio in, `{transcript}` out) — the desktop client's voice path.
 
-- [ ] 13.1 `voice/Listener.kt`: AudioRecord (VOICE_RECOGNITION, 16 kHz mono, PCM16), windowed capture driven by `DictationTake`, states Listening / Transcribing / NoSpeech / Error, and a single commit point on release.
-- [ ] 13.2 Transcription via the dashboard: each window → WAV → base64 data URL → `POST api/audio/transcribe` with the session's auth → transcript; stitch windows with the existing anchor logic. Empty transcript is NoSpeech, not an error.
-- [ ] 13.3 Honest states in the UI: `listening` while held, `transcribing…` after release, then the text lands in the composer (not auto-send unless the release gesture says send) — and `no speech` when the server returns nothing.
-- [ ] 13.4 No network → specific line ("transcription needs the dashboard"), take discarded, nothing sent.
-- [ ] 13.5 Unit tests: WAV header correctness for 16 kHz mono PCM16, base64 data URL shape, window stitching through DictationTake with 3 overlapping windows, empty-transcript → NoSpeech.
-- [ ] 13.6 Leave on-device sherpa as a future option (offline/latency) documented in design.md, with the arm64 + ~120 MB cost written down rather than discovered.
+- [x] 13.1 `voice/Listener.kt`: AudioRecord (VOICE_RECOGNITION, 16 kHz mono, PCM16), windowed capture driven by `DictationTake`, states Listening / Transcribing / NoSpeech / Error, and a single commit point on release.
+- [x] 13.2 Transcription via the dashboard: each window → WAV → base64 data URL → `POST api/audio/transcribe` with the session's auth → transcript; stitch windows with the existing anchor logic. Empty transcript is NoSpeech, not an error.
+- [x] 13.3 Honest states in the UI: `listening` while held, `transcribing…` after release, then the text lands in the composer (not auto-send unless the release gesture says send) — and `no speech` when the server returns nothing.
+- [x] 13.4 No network → specific line ("transcription needs the dashboard"), take discarded, nothing sent.
+- [x] 13.5 Unit tests: WAV header correctness for 16 kHz mono PCM16, base64 data URL shape, window stitching through DictationTake with 3 overlapping windows, empty-transcript → NoSpeech.
+- [x] 13.6 Leave on-device sherpa as a future option (offline/latency) documented in design.md, with the arm64 + ~120 MB cost written down rather than discovered.
+
+M1.4 implementation and requested local gates complete at **106 / 0.2.2**. These checkboxes
+record implementation, not LP3 visual/hardware acceptance: this task explicitly forbids adb/
+emulator use. No live microphone/dashboard transcription is claimed. See `design.md` and
+`evidence.md`; original timestamped stitching remains, with conservative text-only anchors
+for dashboard responses. Earlier missing-engine notes above describe the pre-M1.4 builds.

@@ -47,7 +47,7 @@ data class MenuUi(
     val botCount: Int? = null,
     val cronCount: Int? = null,
     val recentSessions: List<SessionRowUi> = emptyList(),
-    val version: String = "0.2.1",
+    val version: String = "0.2.2",
     val cronSummary: String = "Cron is scheduled and managed in the Hermes desktop dashboard.",
 )
 

@@ -79,23 +79,21 @@ Wheel contract (identical everywhere):
 - Long transcripts: bottom-anchored list; wheel-up loads `messages/around` in 50-message windows;
   position preserved across session switches (stored per session id).
 
-## Voice input (M1, ported from BrightHermes — owner requirement)
+## Voice input (M1.4, dashboard-backed)
 
-BrightHermes already solves the hard part: **unbounded-length hold-to-talk**. Port, do not reinvent:
+The original unbounded/SpeechRecognizer description was incorrect: LightOS has no system
+recognizer, and the BrightHermes take is capped at 300 seconds. The owner selected dashboard
+transcription for M1.4; see `../add-send-streaming-and-voice/design.md` for the current contract.
 
-- `voice/DictationTake.kt` — the take is a sequence of audio chunks; decoding happens in overlapping
-  windows (`next()`), and `complete()` stitches each window's tokens onto the previous text using a
-  word-anchor search (`findAnchor(words, previous)`), so a ten-minute hold produces one coherent
-  transcript with bounded memory and no duplication at window seams.
-- `voice/Listener.kt` — SpeechRecognizer loop with bounded live previews, a single commit point on
-  release, cancel path, and permission/warmup handling.
-- `hw/WheelTalk.kt` — the physical contract: hold = talk, release = send, turn = cancel; whole panel
-  inverts while listening so it reads in bright sunlight; the hint line doubles as on-screen PTT.
-
-Hermes Light keeps all three behaviours verbatim; the only change is where the finished text goes —
-through the dashboard gateway (`command.dispatch`/turn submission) instead of the bridge's `user`
-frame. Voice MUST remain available on every screen that accepts text (Home/thread), including while
-streaming a reply.
+- `voice/DictationTake.kt` retains overlapping 28-second windows, 24-second stride, bounded
+  backlog and timestamped anchors; server text has a conservative text-only anchor path.
+- `voice/Listener.kt` captures AudioRecord VOICE_RECOGNITION at 16 kHz mono PCM16, decodes one
+  window at a time through authenticated dashboard WAV uploads, and commits once on release.
+- Home/Thread release appends to the composer; editor release explicitly sends-and-closes.
+  Turn-to-cancel and lifecycle changes discard the take; failed takes send nothing.
+- On-device sherpa-onnx / Parakeet TDT 110M int8 remains a future offline/latency option:
+  BrightHermes's AAR is arm64-only and its model is approximately 120 MB. It cannot run on the
+  x86_64 emulator; no recognizer/model is bundled in this APK.
 
 ## Failure and honesty rules
 
