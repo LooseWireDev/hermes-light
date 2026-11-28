@@ -523,3 +523,19 @@ formatting issues were corrected before the final run. Existing SDK publication/
 redundant-else warnings remain. No device or official-builder acceptance is inferred.
 
 Artifact: `tool/build/outputs/apk/debug/tool-debug.apk`.
+
+## 2026-11-27 — M1.5–M1.7 device acceptance (composer, queue, new chats)
+
+Signed 0.2.3 (code 107) on the LP3 AVD, loopback dashboard.
+
+- Composer: `LightTextField` reads `Message` / `hold the wheel to talk`, opens the SDK editor, returns the
+  draft (`composer test` survived the editor), and the action label reflects live state.
+- Queue reconciliation (M1.6): after the fix the action read `SEND` (not `QUEUE`) on an idle session —
+  the stale-running flag is gone.
+- `4090` traced honestly by the app's own RPC logging: `This chat is open in another window/terminal`.
+  Not an app defect; the session was held by the desktop.
+- New chats (M1.7), full round trip on the device: tapped `New session` → a thread opened
+  (`No messages yet`, composer focused) → typed `hello from the wheel` → SEND → the dashboard created
+  session `20261127_180254_2af18b` (auto-titled "Hello from the wheel"), stored the user message, and
+  the assistant replied "Round trip confirmed — your message arrived here as a normal text turn".
+- Not device-verified: the listening panel's waveform (no microphone on the AVD) — phone test.
