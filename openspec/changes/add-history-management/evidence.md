@@ -84,3 +84,22 @@ After the last code edit, with the supplied Android SDK/JDK/toolchain paths:
 - Existing Android publication/compile-SDK compatibility warnings remain; no SDK edits were made.
 - No runtime visual proof under the explicit no-adb/no-emulator restriction. Owner device
   acceptance of these new network paths remains the next verification step.
+
+## 2026-11-27 — history management, device + contract acceptance
+
+Signed 0.2.4 (code 108) on the LP3 AVD, loopback dashboard.
+
+Verified in the UI: `SEARCH` action, live filter, `no sessions match`, the long-press sheet
+(`Session / Rename / Delete`) and the honest failure line (`rename failed — Dashboard returned
+HTTP 409` on the pre-fence build).
+
+Verified at the contract level (the exact calls the app now makes):
+- `GET api/sessions/{id}/mutation-snapshot` → `{exists:true, runtime_revision:0, runtime_generation:0}`.
+- Unfenced `PATCH {title}` → `HTTP 409` (confirms the fence is required, not optional).
+- Fenced `PATCH {title, request_id, expected_revision, expected_generation}` → `200 {revision:1, title:"Wheel test renamed"}`; listing shows the new title.
+- Fenced `DELETE ?request_id&expected_revision=1&expected_generation=0` → `200 {operation:"delete", deleted_ids:[…]}`; the session left the list.
+- Server search: `/api/sessions/search?q=mortgage` through the app returned `22 of 22`, i.e. results beyond the loaded page.
+
+Not verified: tapping Rename through to the editor on the AVD — emulator navigation drifted between
+screens during the run, so the UI half is covered by unit tests plus the contract proof above. Owner
+tap on the phone closes it.
