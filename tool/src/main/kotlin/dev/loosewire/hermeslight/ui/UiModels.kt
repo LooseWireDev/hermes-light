@@ -142,6 +142,13 @@ data class ThreadPosition(
     val offsetPx: Int = 0,
 )
 
+/** Live voice state. Errors and empty takes stay in [ThreadUi.voiceFeedback], not here. */
+enum class VoicePhase {
+    Idle,
+    Listening,
+    Transcribing,
+}
+
 data class ThreadUi(
     val sessionId: String? = null,
     val title: String = "",
@@ -164,6 +171,13 @@ data class ThreadUi(
     val running: Boolean = false,
     val voiceFeedback: String? = null,
     val wheelDiagnostics: String? = null,
+    val voicePhase: VoicePhase = VoicePhase.Idle,
+    /** Latest microphone RMS, 0..1. Only meaningful while [voicePhase] is Listening. */
+    val voiceLevel: Float = 0f,
+    /** Words decoded so far for the live take, empty until the first window returns. */
+    val voicePartial: String = "",
+    /** Bumped by the application when the text editor closes; screens focus Send. */
+    val composerFocusRevision: Int = 0,
 )
 
 data class ThreadActions(
@@ -177,7 +191,6 @@ data class ThreadActions(
     val onAction: (String) -> Unit = {},
     val onHoldStart: () -> Unit = {},
     val onHoldEnd: () -> Unit = {},
-    val onHoldSendAndClose: (onSent: () -> Unit) -> Unit = {},
     val onHoldCancel: () -> Unit = {},
     val onDiagnostics: () -> Unit = {},
 )

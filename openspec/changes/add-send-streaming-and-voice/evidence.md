@@ -382,3 +382,53 @@ Signed 0.2.2 (code 106) on the LP3 AVD; dashboard loopback.
   thing alpha6 must be judged on, with the microphone.
 - Also unverified here: the diagnostics readout — the long-press on the status line did not surface a
   panel in two attempts on the AVD.
+
+## 2026-11-27 — task group 14: M1.5 voice panel and SDK composer
+
+- Owner report is the baseline: alpha6 dictation works on the physical phone. This change adds
+  visibility and review, not a replacement recognizer or a repeat of that device probe.
+- `Listener.level` exposes normalized chunk RMS with 0.35 exponential smoothing, computed in the
+  existing PCM conversion loop. `Listener.partial` exposes DictationTake's stitched completed
+  windows. Both reset per take/cancel; session-locked writes reject cancelled or replaced work.
+  Partial text starts after a window decodes (the existing 28-second input), not word-by-word.
+- Home and Thread replace everything below the SDK top bar with LISTENING, stitched text,
+  thirteen thick monochrome bars sampled every 90 ms, oldest left, and the requested hint
+  `let go to send · turn the wheel to cancel`. The waveform uses display gain/square-root scaling;
+  the underlying RMS remains 0..1. Release freezes the meter and shows `transcribing…`.
+  The editor uses the same takeover without disposing its text state or wheel binding.
+- Turn-while-held cancels immediately and leaves the prior draft unchanged. Release on every
+  text-entry surface finishes into the draft for review; it never submits a gateway prompt.
+  This deliberately supersedes M1.4 editor send-and-close despite the requested legacy hint text.
+- The SDK `LightTextField` is labelled `Message`, with `hold the wheel to talk` as placeholder.
+  It opens the multiline SDK `LightTextInputEditor`; SAVE/Back/wheel click preserve the draft,
+  close the editor and focus the adjacent Send action. Send becomes Queue during a running turn.
+  The shared controller retains independent per-session drafts across navigation. Obsolete
+  synthetic Compose/Send transcript rows and voice send-and-close callbacks were removed.
+- Unknown model status now omits the model row. Resolved nonblank session models still display.
+  Tool metadata and Menu About are **107 / 0.2.3**, package `dev.loosewire.hermeslight`.
+- Local/development lane on the existing owner SDK `main` at
+  `251237ef3778c907c5dbd89e84685532c9d99a28`; its pre-existing dirty files were not changed.
+  No adb/emulator, install, upload, signing, release publication or push was performed.
+  Live capture/dashboard and 411×472dp sunlight/readability/wheel acceptance remain unverified;
+  14.2/14.3 retain their visual acceptance boxes and accepted specs are not synced.
+- The canonical Obsidian vault remains unavailable: both `Home.md` and `Projects/Projects.md`
+  were missing under `/home/gav/Documents/obsidian-vault`. Repository evidence records the
+  durable change; a safe intended vault update is retained at `local://hermes-light-m15-vault.md`.
+
+### Verification after the last code edit
+
+With the requested Android SDK, JDK 21 on PATH and both Java installation paths:
+
+```sh
+./gradlew -Porg.gradle.java.installations.paths="$HOME/.local/share/light-tern-toolchain/jdk17,$HOME/.local/opt/temurin21" ktlintCheck checkColorLiterals :tool:testDebugUnitTest :tool:assembleDebug --continue --console=plain
+```
+
+**BUILD SUCCESSFUL in 10s; 202 tests across 24 files, zero failures/errors/skips.**
+The initial run passed tests and assembly but found ktlint chain wrapping and missing declaration
+spacing; the final four-gate run passed after those formatting-only corrections. Added coverage
+checks exact RMS smoothing/reset, stitched partials before release, stale telemetry after restart,
+panel phase mapping, no implicit dictation submit, multiline draft retention through navigation/
+backgrounding, independent session drafts, and wheel traversal through the new field/Send actions.
+
+Artifact: `tool/build/outputs/apk/debug/tool-debug.apk`.
+Existing SDK publication/compile-SDK warnings and fake-microphone Java-Object style warnings remain.

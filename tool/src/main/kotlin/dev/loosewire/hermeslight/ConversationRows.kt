@@ -136,6 +136,4 @@ internal fun Conversation.liveRows(): List<ThreadMessageUi> =
             }
             clarify.error?.let { line("clarify:$key:error", it, kind = ThreadMessageKind.Error) }
         }
-        line("composer", if (composer.isBlank()) "Compose" else "Draft: $composer", "compose")
-        if (composer.isNotBlank()) line("composer:send", if (running) "Queue" else "Send", "send")
     }

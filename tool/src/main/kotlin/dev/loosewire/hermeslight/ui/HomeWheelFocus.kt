@@ -1,8 +1,14 @@
 package dev.loosewire.hermeslight.ui
 
-/** Home actions are reached from the newest end only; the oldest end never crosses focus. */
+/**
+ * Home focus cycle: transcript → composer → Send → top-bar Menu → attention strip → transcript.
+ * Turns inside the transcript scroll it first; only its newest end crosses into the composer. The
+ * oldest end never crosses focus.
+ */
 internal enum class HomeWheelFocus {
     Thread,
+    Composer,
+    Send,
     Menu,
     Status,
     ;
@@ -10,7 +16,9 @@ internal enum class HomeWheelFocus {
     fun previous(hasMessages: Boolean): HomeWheelFocus =
         when (this) {
             Thread -> Thread
-            Menu -> if (hasMessages) Thread else Menu
+            Composer -> if (hasMessages) Thread else Composer
+            Send -> Composer
+            Menu -> Send
             Status -> Menu
         }
 
@@ -20,13 +28,15 @@ internal enum class HomeWheelFocus {
         hasStatus: Boolean,
     ): HomeWheelFocus =
         when (this) {
-            Thread -> Menu
+            Thread -> Composer
+            Composer -> Send
+            Send -> Menu
             Menu ->
                 when {
                     hasStatus -> Status
                     hasMessages -> Thread
-                    else -> Menu
+                    else -> Composer
                 }
-            Status -> if (hasMessages) Thread else Menu
+            Status -> if (hasMessages) Thread else Composer
         }
 }

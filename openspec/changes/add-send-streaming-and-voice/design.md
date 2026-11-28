@@ -28,9 +28,9 @@ close cancel the take and invalidate late microphone-permission/network callback
 States are `listening` while held, `transcribing…` after release, `no speech` for an
 empty take, and exactly `transcription needs the dashboard` for a failed take. Existing
 microphone-denial guidance continues to name LightOS Settings. Home and Thread release
-append to the selected session's composer without sending. Inside the composer editor,
-release is explicitly send-and-close; it uses the same submit/queue path as typed text.
-No blank or failed take invokes submission or closes the editor.
+append to the selected session's composer without sending. M1.5 extends this to the SDK editor:
+release returns to editing, SAVE returns to the composer with Send focused, and sending is always a
+separate explicit action. No blank or failed take invokes submission or closes the editor.
 
 ## Text-only overlap anchors
 
@@ -39,8 +39,8 @@ The dashboard returns plain text without token timestamps. The original timestam
 conservative word-anchor completion path in the same take, not fabricated timestamps.
 Ambiguous or missing anchors fail instead of silently duplicating or deleting speech.
 This cannot provide the acoustic certainty of timestamped word ownership; repeated or
-rewritten overlap text can reject an otherwise audible take. There are no speculative
-live transcript previews or partial-result commits.
+rewritten overlap text can reject an otherwise audible take. M1.5 displays only the windows
+already stitched by DictationTake as a live preview; previews never commit a draft or send.
 
 ## Future on-device option
 
@@ -49,6 +49,20 @@ and latency. BrightHermes uses an **arm64-only** sherpa-onnx AAR and approximate
 **120 MB** of model assets. It cannot run on the **x86_64** verification emulator and
 would add model distribution/storage plus SDK dependency-policy work. M1.4 does not
 package it or weaken SDK policy to admit it.
+
+## M1.5 panel and composer
+
+Listening and transcribing replace the entire Home/Thread content below the top bar; the editor
+uses the same panel without disposing its text state or wheel binding. Thirteen high-contrast bars
+sample the smoothed chunk RMS at 90 ms intervals, oldest left. A turn while held cancels immediately,
+clears the take's telemetry and returns to the untouched draft. Release shows `transcribing…` until
+the final result returns to the draft. The requested hint says “let go to send”; release actually
+finishes dictation for review, not a gateway submission.
+
+The SDK `LightTextField` opens its own multi-line `LightTextInputEditor`. Draft changes remain in
+the controller's per-session conversations across screen navigation; SAVE returns with Send
+focused. The adjacent send/queue action uses the existing submission path, never the voice callback.
+Unknown model status occupies no placeholder row.
 
 ## Acceptance boundary
 

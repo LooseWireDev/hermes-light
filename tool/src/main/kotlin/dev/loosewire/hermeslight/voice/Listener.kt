@@ -21,12 +21,19 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlin.math.sqrt
 
 internal const val CAPTURE_RATE = 16_000
 
 /** 100 ms of PCM16 audio per blocking read; also the reusable FloatArray size. */
 internal const val CAPTURE_CHUNK = CAPTURE_RATE / 10
+
+/** Per-chunk exponential smoothing applied to the published microphone level (0..1). */
+internal const val LEVEL_SMOOTHING = 0.35f
 
 /** DictationTake caps a take at five minutes; keep the capture loop on the same clock. */
 private const val CAPTURE_SAMPLES = CAPTURE_RATE * 300
@@ -39,6 +46,10 @@ private const val CAPTURE_SAMPLES = CAPTURE_RATE * 300
  * drains the final window), and [cancel] discards everything. A completed take calls [onResult]
  * exactly once with nonempty text and never submits it; the caller owns that decision. Failures of
  * capture, network decoding or stitching discard the take and report [State.Error] with no result.
+ *
+ * Live telemetry is exposed as [level] and [partial]: the smoothed input level and the stitched
+ * transcript of completed windows. Both reset when a take starts or is cancelled, and only the
+ * current session may write them.
  *
  * The capture factory, dispatchers and main-thread [dispatch] are injectable so JVM tests can drive
  * audio and callbacks deterministically; production uses [AudioRecord] and the main [Looper].
@@ -65,6 +76,16 @@ internal class Listener(
         data object Error : State
     }
 
+    private val _level = MutableStateFlow(0f)
+
+    /** Smoothed root-mean-square of the current take's captured audio, 0..1. */
+    val level: StateFlow<Float> = _level.asStateFlow()
+
+    private val _partial = MutableStateFlow("")
+
+    /** Stitched transcript of the current take as its windows complete. */
+    val partial: StateFlow<String> = _partial.asStateFlow()
+
     private val lock = Any()
 
     /** The take whose callbacks are allowed to land; null after cancel. */
@@ -85,7 +106,10 @@ internal class Listener(
         previous?.let { shutdown(it) }
 
         val session = Session()
-        synchronized(lock) { current = session }
+        synchronized(lock) {
+            current = session
+            resetTelemetryLocked()
+        }
         publish(session, State.Listening)
         session.decodeJob = scope.launch(decodeDispatcher) { decodeLoop(session) }
         session.captureJob = scope.launch(captureDispatcher) { captureLoop(session) }
@@ -129,6 +153,7 @@ internal class Listener(
                 val active = current ?: return
                 current = null
                 active.cancelled = true
+                resetTelemetryLocked()
                 active
             }
         shutdown(session)
@@ -138,6 +163,7 @@ internal class Listener(
         val take = DictationTake(CAPTURE_RATE)
         val notifications = Channel<Unit>(Channel.CONFLATED)
         var capture: PcmCapture? = null
+        var level = 0f
 
         @Volatile
         var captureJob: Job? = null
@@ -185,6 +211,7 @@ internal class Listener(
                     if (!usable(session)) return true
                     session.take.complete(window, transcript)
                 } ?: break
+            publishPartial(session, result.text)
             if (result.send) {
                 // endCapture() is only called after release, so a final window cannot leak early.
                 if (result.text.isNotEmpty()) {
@@ -300,7 +327,12 @@ internal class Listener(
                     delay(1)
                     continue
                 }
-                for (i in 0 until read) floats[i] = shorts[i] / 32768f
+                var energy = 0f
+                for (i in 0 until read) {
+                    val sample = shorts[i] / 32768f
+                    floats[i] = sample
+                    energy += sample * sample
+                }
                 val accepted = append(session, floats, read, fed)
                 when (accepted) {
                     STOPPED, CAPPED -> break
@@ -309,6 +341,7 @@ internal class Listener(
                         break
                     }
                     else -> {
+                        publishLevel(session, sqrt(energy / read))
                         fed += accepted
                         session.notifications.trySend(Unit)
                         if (released || accepted < read || fed >= CAPTURE_SAMPLES) break
@@ -366,6 +399,39 @@ internal class Listener(
     private fun canCapture(session: Session): Boolean = synchronized(lock) { usable(session) && !session.released }
 
     private fun usable(session: Session): Boolean = current === session && !session.cancelled && !session.failed
+
+    /**
+     * Smooths and publishes one chunk's RMS. The validity check and the write share the listener
+     * lock, so a cancelled or replaced session can never surface telemetry from another take.
+     */
+    private fun publishLevel(
+        session: Session,
+        rms: Float,
+    ) {
+        synchronized(lock) {
+            if (!telemetryAllowedLocked(session)) return
+            session.level += LEVEL_SMOOTHING * (rms - session.level)
+            session.level = session.level.coerceIn(0f, 1f)
+            _level.value = session.level
+        }
+    }
+
+    private fun publishPartial(
+        session: Session,
+        text: String,
+    ) {
+        synchronized(lock) {
+            if (telemetryAllowedLocked(session)) _partial.value = text
+        }
+    }
+
+    private fun telemetryAllowedLocked(session: Session): Boolean =
+        current === session && !session.cancelled && !session.failed && !session.terminal
+
+    private fun resetTelemetryLocked() {
+        _level.value = 0f
+        _partial.value = ""
+    }
 
     private fun publish(
         session: Session,

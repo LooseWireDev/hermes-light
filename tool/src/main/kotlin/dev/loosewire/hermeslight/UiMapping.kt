@@ -11,6 +11,8 @@ import dev.loosewire.hermeslight.ui.ThreadNoticeKind
 import dev.loosewire.hermeslight.ui.ThreadNoticeUi
 import dev.loosewire.hermeslight.ui.ThreadPosition
 import dev.loosewire.hermeslight.ui.ThreadUi
+import dev.loosewire.hermeslight.ui.VoicePhase
+import dev.loosewire.hermeslight.voice.Listener
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -175,5 +177,11 @@ internal fun AppState.threadUi(): ThreadUi {
         composer = conversation.composer,
         running = conversation.running,
         voiceFeedback = voiceFeedback,
+        voicePhase =
+            when (voiceState) {
+                Listener.State.Listening -> VoicePhase.Listening
+                Listener.State.Transcribing -> VoicePhase.Transcribing
+                Listener.State.Idle, Listener.State.NoSpeech, Listener.State.Error -> VoicePhase.Idle
+            },
     )
 }

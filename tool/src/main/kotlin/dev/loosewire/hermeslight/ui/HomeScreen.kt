@@ -24,8 +24,11 @@ import dev.loosewire.hermeslight.ui.common.WheelScroll
 import dev.loosewire.hermeslight.ui.common.rememberThreadReader
 
 /**
- * Home: a single Menu action, conditional attention strip, transcript and connection status.
- * The thread's position and older/newer callbacks are shared with the full Thread screen.
+ * Home: a single Menu action, conditional attention strip, transcript, composer and connection
+ * status. The thread's position and older/newer callbacks are shared with the full Thread screen.
+ *
+ * While a voice take is live the whole content area is the listening panel; the wheel bindings
+ * stay on [WheelScroll], so release and turn-to-cancel keep reaching their handlers.
  */
 @Composable
 fun HomeScreen(
@@ -44,7 +47,7 @@ fun HomeScreen(
             onAction = actions.threadActions.onAction,
         )
     var focus by remember(thread.sessionId) {
-        mutableStateOf(if (thread.messages.isEmpty()) HomeWheelFocus.Menu else HomeWheelFocus.Thread)
+        mutableStateOf(if (thread.messages.isEmpty()) HomeWheelFocus.Composer else HomeWheelFocus.Thread)
     }
     val wheelFocus =
         if (focus == HomeWheelFocus.Status && state.statusStrip == null) HomeWheelFocus.Menu else focus
@@ -52,16 +55,42 @@ fun HomeScreen(
         if (state.statusStrip == null && focus == HomeWheelFocus.Status) focus = HomeWheelFocus.Menu
     }
 
+    // A saved editor draft, a completed voiced take, or a fresh draft focuses Send. Entering Home
+    // with no draft change keeps the reader's current focus.
+    var seenComposer by remember(thread.sessionId) { mutableStateOf(thread.composer) }
+    LaunchedEffect(thread.composer) {
+        if (thread.composer != seenComposer) {
+            seenComposer = thread.composer
+            if (thread.composer.isNotBlank()) focus = HomeWheelFocus.Send
+        }
+    }
+    LaunchedEffect(thread.composerFocusRevision) {
+        if (thread.composerFocusRevision > 0 && thread.composer.isNotBlank()) {
+            focus = HomeWheelFocus.Send
+        }
+    }
+
+    val voiceActive = thread.voicePhase != VoicePhase.Idle
+    val listening = thread.voicePhase == VoicePhase.Listening
+
+    fun sendDraft() {
+        if (thread.composer.isNotBlank()) actions.threadActions.onSubmit(thread.composer)
+    }
+
     WheelScroll(
         onUp = {
-            if (wheelFocus == HomeWheelFocus.Thread) {
+            if (voiceActive) {
+                if (listening) actions.threadActions.onHoldCancel()
+            } else if (wheelFocus == HomeWheelFocus.Thread) {
                 if (!reader.moveUp() && thread.hasOlder) actions.threadActions.onLoadOlder()
             } else {
                 focus = wheelFocus.previous(hasMessages = thread.messages.isNotEmpty())
             }
         },
         onDown = {
-            if (wheelFocus != HomeWheelFocus.Thread || !reader.moveDown()) {
+            if (voiceActive) {
+                if (listening) actions.threadActions.onHoldCancel()
+            } else if (wheelFocus != HomeWheelFocus.Thread || !reader.moveDown()) {
                 if (wheelFocus == HomeWheelFocus.Thread && thread.hasNewer) {
                     actions.threadActions.onLoadNewer()
                 } else {
@@ -74,10 +103,14 @@ fun HomeScreen(
             }
         },
         onClick = {
-            when (wheelFocus) {
-                HomeWheelFocus.Thread -> reader.activate()
-                HomeWheelFocus.Menu -> actions.onOpenMenu()
-                HomeWheelFocus.Status -> state.statusStrip?.let { actions.onOpenStatus(it.sessionId) }
+            if (!voiceActive) {
+                when (wheelFocus) {
+                    HomeWheelFocus.Thread -> reader.activate()
+                    HomeWheelFocus.Composer -> actions.threadActions.onAction("compose")
+                    HomeWheelFocus.Send -> sendDraft()
+                    HomeWheelFocus.Menu -> actions.onOpenMenu()
+                    HomeWheelFocus.Status -> state.statusStrip?.let { actions.onOpenStatus(it.sessionId) }
+                }
             }
         },
         onBack = actions.onBack,
@@ -95,7 +128,7 @@ fun HomeScreen(
             LightTopBar(
                 leftButton =
                     LightBarButton.Text(
-                        if (wheelFocus == HomeWheelFocus.Menu) "› Menu" else "Menu",
+                        if (!voiceActive && wheelFocus == HomeWheelFocus.Menu) "› Menu" else "Menu",
                         onClick = actions.onOpenMenu,
                     ),
                 center =
@@ -103,25 +136,42 @@ fun HomeScreen(
                         thread.title.ifBlank { thread.botName.ifBlank { "Hermes" } },
                     ),
             )
-            HomeStatusStrip(
-                state.statusStrip,
-                focused = wheelFocus == HomeWheelFocus.Status,
-                onOpen = actions.onOpenStatus,
-            )
-            ThreadView(
-                messages = thread.messages,
-                emptyText = thread.emptyText,
-                reader = reader,
-                agentLabel = thread.botName,
-                modifier =
-                    Modifier
-                        .weight(1f)
-                        .fillMaxWidth()
-                        .padding(horizontal = 0.3f.gridUnitsAsDp()),
-                showFocus = wheelFocus == HomeWheelFocus.Thread,
-            )
-            thread.voiceFeedback?.let { HintLine(it) }
-            StatusLine(status = thread.status)
+            if (voiceActive) {
+                ListeningPanel(
+                    phase = thread.voicePhase,
+                    level = thread.voiceLevel,
+                    partial = thread.voicePartial,
+                    modifier = Modifier.weight(1f),
+                )
+            } else {
+                HomeStatusStrip(
+                    state.statusStrip,
+                    focused = wheelFocus == HomeWheelFocus.Status,
+                    onOpen = actions.onOpenStatus,
+                )
+                ThreadView(
+                    messages = thread.messages,
+                    emptyText = thread.emptyText,
+                    reader = reader,
+                    agentLabel = thread.botName,
+                    modifier =
+                        Modifier
+                            .weight(1f)
+                            .fillMaxWidth()
+                            .padding(horizontal = 0.3f.gridUnitsAsDp()),
+                    showFocus = wheelFocus == HomeWheelFocus.Thread,
+                )
+                thread.voiceFeedback?.let { HintLine(it) }
+                MessageComposer(
+                    draft = thread.composer,
+                    running = thread.running,
+                    fieldFocused = wheelFocus == HomeWheelFocus.Composer,
+                    sendFocused = wheelFocus == HomeWheelFocus.Send,
+                    onOpenEditor = { actions.threadActions.onAction("compose") },
+                    onSend = { sendDraft() },
+                )
+                StatusLine(status = thread.status)
+            }
         }
     }
 }

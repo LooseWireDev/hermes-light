@@ -163,8 +163,15 @@ for dashboard responses. Earlier missing-engine notes above describe the pre-M1.
 Owner: dictation works on the phone; wants a visible listening state (BrightHermes' full-area panel
 with waveform, then a compose step) and a proper Light SDK text field instead of `· Compose`.
 
-- [ ] 14.1 Listener exposes `level: StateFlow<Float>` (RMS of the live chunk, 0..1) and `partial: StateFlow<String>` (windows stitched so far).
+- [x] 14.1 Listener exposes `level: StateFlow<Float>` (RMS of the live chunk, 0..1) and `partial: StateFlow<String>` (windows stitched so far).
 - [ ] 14.2 Listening panel: full content-area takeover while recording — 13-bar waveform (90 ms steps, oldest left), live partial text, hint `let go to send · turn the wheel to cancel`, thread hidden behind it; `transcribing…` state on release, then the final text lands in the composer.
 - [ ] 14.3 Composer: `LightTextField` (label `Message`, placeholder naming the wheel gesture) opening `LightTextInputEditor`, a send action beside it with focus state, multi-line text, and a draft that survives navigation.
-- [ ] 14.4 Status: never print `Model unavailable`; show the model when resolved, omit the fragment otherwise.
-- [ ] 14.5 Tests for the panel's state mapping (idle → listening → transcribing → composer) and the draft retention. Version 0.2.3 / code 107.
+- [x] 14.4 Status: never print `Model unavailable`; show the model when resolved, omit the fragment otherwise.
+- [x] 14.5 Tests for the panel's state mapping (idle → listening → transcribing → composer) and the draft retention. Version 0.2.3 / code 107.
+
+M1.5 implementation and all four requested local gates are complete at **107 / 0.2.3**.
+14.2 and 14.3 remain unchecked only for visual/hardware acceptance: this task explicitly forbids
+adb/emulator use. Home, Thread and the SDK editor now show the takeover panel; all releases
+finish into a reviewable draft, and editor SAVE returns with Send focused. The synthetic Compose/
+Send transcript rows and the editor send-on-release path are removed. Drafts remain per-session
+in the shared controller. See `evidence.md` for the 202-test result and remaining device boundary.

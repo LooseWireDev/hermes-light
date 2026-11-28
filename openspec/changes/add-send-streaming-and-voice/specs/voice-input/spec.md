@@ -10,9 +10,10 @@ system speech recognizer; it supersedes the earlier unbounded/on-device assumpti
 ### Requirement: Hold-to-talk on the wheel
 
 Holding the wheel SHALL start microphone capture after the SDK grants permission. Releasing
-SHALL commit once and drain the final window. Home and Thread SHALL append the result to the
-composer without sending. Inside the composer editor, release SHALL be an explicit send-and-close
-gesture using the typed submit/queue path. Turning while held SHALL cancel and discard the take.
+SHALL commit once and drain the final window. Home, Thread and the composer editor SHALL append
+the result to the draft without sending. The editor SHALL save back to the visible composer with
+Send focused; submission requires a separate action. Turning while held SHALL cancel and discard
+the take.
 
 #### Scenario: Long thought, one take
 
@@ -57,7 +58,7 @@ Navigation, backgrounding, session/profile replacement and editor close SHALL in
 #### Scenario: Streaming reply, user holds wheel
 
 - **WHEN** a reply is still streaming and the user holds the wheel and speaks
-- **THEN** dictation starts; editor send-and-close queues through the same path as typed text, while ordinary release only edits the draft
+- **THEN** dictation starts and release only edits the draft; a subsequent explicit send queues through the typed submission path
 
 ### Requirement: Honest voice failures
 

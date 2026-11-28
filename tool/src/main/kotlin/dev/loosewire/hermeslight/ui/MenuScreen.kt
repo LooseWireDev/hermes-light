@@ -47,7 +47,7 @@ data class MenuUi(
     val botCount: Int? = null,
     val cronCount: Int? = null,
     val recentSessions: List<SessionRowUi> = emptyList(),
-    val version: String = "0.2.2",
+    val version: String = "0.2.3",
     val cronSummary: String = "Cron is scheduled and managed in the Hermes desktop dashboard.",
 )
 
@@ -136,12 +136,14 @@ fun MenuScreen(
             StatusLine(status = state.status)
 
             Column(modifier = Modifier.padding(horizontal = 1f.gridUnitsAsDp(), vertical = 0.2f.verticalGridUnitsAsDp())) {
-                LightText(
-                    text = state.model.ifBlank { "Model unavailable" },
-                    variant = LightTextVariant.Copy,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
+                if (state.model.isNotBlank()) {
+                    LightText(
+                        text = state.model,
+                        variant = LightTextVariant.Copy,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
                 LightText(
                     text = statusCounts,
                     variant = LightTextVariant.Superfine,

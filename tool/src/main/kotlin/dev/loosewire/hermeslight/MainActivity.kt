@@ -175,6 +175,9 @@ private fun SimpleLightScreen<Unit>.Surface(
     val back: () -> Unit = { if (route != Route.Home) goBack() }
     val setup: () -> Unit = { if (route != Route.Setup) open(controller, route, Route.Setup, voice) }
     var composing by remember(state.selectedSession, state.profileVersion) { mutableStateOf(false) }
+    var composerFocusRevision by remember(state.selectedSession, state.profileVersion) { mutableIntStateOf(0) }
+    val voiceLevel by controller.voiceLevel.collectAsState()
+    val voicePartial by controller.voicePartial.collectAsState()
     val permissionLauncher = rememberRecordAudioPermissionLauncher()
     val scope = rememberCoroutineScope()
     DisposableEffect(state.selectedSession, state.profileVersion) {
@@ -184,8 +187,11 @@ private fun SimpleLightScreen<Unit>.Surface(
         }
     }
     val thread =
-        state.threadUi().copy(
+        remember(state) { state.threadUi() }.copy(
             wheelDiagnostics = voice.diagnostics,
+            voiceLevel = voiceLevel,
+            voicePartial = voicePartial,
+            composerFocusRevision = composerFocusRevision,
         )
     LaunchedEffect(state.sessionsRequired) {
         if (state.sessionsRequired) {
@@ -239,10 +245,6 @@ private fun SimpleLightScreen<Unit>.Surface(
                 voice.gesture++
                 controller.releaseVoice()
             },
-            onHoldSendAndClose = { onSent ->
-                voice.gesture++
-                controller.releaseVoice(onSent)
-            },
             onHoldCancel = {
                 voice.gesture++
                 controller.cancelVoice()
@@ -278,7 +280,11 @@ private fun SimpleLightScreen<Unit>.Surface(
         CompositionLocalProvider(LocalScreenWheel provides wheel) {
             when {
                 !state.initialized -> LightText("connecting…", LightTextVariant.Detail)
-                composing -> ComposerEditor(thread, threadActions) { composing = false }
+                composing ->
+                    ComposerEditor(thread, threadActions) {
+                        composerFocusRevision++
+                        composing = false
+                    }
                 route == Route.Setup || !state.configured -> SetupForm(state, controller, back)
                 route == Route.Home ->
                     HomeScreen(
@@ -306,9 +312,15 @@ private fun SimpleLightScreen<Unit>.Surface(
                         MenuUi(
                             status = state.statusUi(),
                             model =
-                                state.sessions.firstOrNull { it.id == state.selectedSession }?.model
-                                    ?: state.menuSessions.firstOrNull { it.id == state.selectedSession }?.model
-                                    ?: "Model unavailable",
+                                state.sessions
+                                    .firstOrNull { it.id == state.selectedSession }
+                                    ?.model
+                                    ?.takeIf(String::isNotBlank)
+                                    ?: state.menuSessions
+                                        .firstOrNull { it.id == state.selectedSession }
+                                        ?.model
+                                        ?.takeIf(String::isNotBlank)
+                                    ?: "",
                             sessionCount = state.menuSessionCount,
                             botCount = state.bots.size.takeIf { state.botsLoaded },
                             cronCount = state.menuCronCount,

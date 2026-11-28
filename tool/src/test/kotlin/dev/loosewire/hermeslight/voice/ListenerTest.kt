@@ -156,6 +156,135 @@ class ListenerTest {
             listener.cancel()
         }
 
+    @Test
+    fun `level is a smoothed rms of captured chunks and resets on cancel`() =
+        runBlocking {
+            val events = Events()
+            val capture = GatedCapture()
+            val listener = listener(this, events, { capture }) { "unused" }
+            val loud = ShortArray(CAPTURE_CHUNK) { 16384 }
+            val silent = ShortArray(CAPTURE_CHUNK)
+            val rms = 16384f / 32768f
+
+            listener.start()
+            capture.send(loud)
+            val first = LEVEL_SMOOTHING * rms
+            await { listener.level.value > 0f }
+            assertEquals(first, listener.level.value, 1e-5f)
+
+            capture.send(loud)
+            val second = first + LEVEL_SMOOTHING * (rms - first)
+            await { listener.level.value > first }
+            assertEquals(second, listener.level.value, 1e-5f)
+
+            capture.send(silent)
+            val third = second + LEVEL_SMOOTHING * (0f - second)
+            await { listener.level.value < second }
+            assertEquals(third, listener.level.value, 1e-5f)
+
+            listener.cancel()
+            assertEquals(0f, listener.level.value)
+        }
+
+    @Test
+    fun `partial reports stitched text as windows complete before release`() =
+        runBlocking {
+            val events = Events()
+            val captureCount = AtomicInteger()
+            val calls = AtomicInteger()
+            val listener =
+                Listener(
+                    scope = this,
+                    transcribe = {
+                        when (calls.incrementAndGet()) {
+                            1 -> "alpha beta"
+                            2 -> "beta gamma"
+                            else -> "gamma delta"
+                        }
+                    },
+                    onState = { events.states += it },
+                    onResult = { events.results += it },
+                    captureFactory = {
+                        if (captureCount.incrementAndGet() == 1) {
+                            FakeCapture(chunks(60.0), paceMs = 1)
+                        } else {
+                            GatedCapture()
+                        }
+                    },
+                    dispatch = { it() },
+                    captureDispatcher = Dispatchers.IO,
+                    decodeDispatcher = Dispatchers.IO,
+                )
+
+            listener.start()
+            await { listener.partial.value == "alpha beta gamma" }
+            assertTrue(events.results.isEmpty())
+            assertTrue(events.states.contains(Listener.State.Listening))
+            assertEquals(2, calls.get())
+
+            listener.release()
+            await { events.results.isNotEmpty() }
+            assertEquals(listOf("alpha beta gamma delta"), events.results)
+            assertEquals("alpha beta gamma delta", listener.partial.value)
+
+            listener.start()
+            assertEquals("", listener.partial.value)
+            assertEquals(0f, listener.level.value)
+            listener.cancel()
+        }
+
+    @Test
+    fun `cancelled take cannot publish telemetry after a restart`() =
+        runBlocking {
+            val events = Events()
+            val gate = CompletableDeferred<String>()
+            val calls = AtomicInteger()
+            val captures = CopyOnWriteArrayList<GatedCapture>()
+            val listener =
+                Listener(
+                    scope = this,
+                    transcribe = {
+                        if (calls.incrementAndGet() == 1) gate.await() else "fresh"
+                    },
+                    onState = { events.states += it },
+                    onResult = { events.results += it },
+                    captureFactory = { GatedCapture().also { captures += it } },
+                    dispatch = { it() },
+                    captureDispatcher = Dispatchers.IO,
+                    decodeDispatcher = Dispatchers.IO,
+                )
+            val loud = ShortArray(CAPTURE_CHUNK) { 16384 }
+
+            listener.start()
+            await { captures.size == 1 }
+            repeat(280) { captures[0].send(loud) }
+            await { calls.get() == 1 }
+            assertTrue(listener.level.value > 0f)
+
+            listener.cancel()
+            assertEquals(0f, listener.level.value)
+            assertEquals("", listener.partial.value)
+
+            listener.start()
+            await { captures.size == 2 }
+            gate.complete("stale")
+            Thread.sleep(100)
+            assertEquals("", listener.partial.value)
+            assertTrue(events.results.isEmpty())
+            assertEquals(0f, listener.level.value)
+
+            repeat(10) { captures[1].send(loud) }
+            await { listener.level.value > 0.4f }
+            listener.release()
+            await { events.results.isNotEmpty() }
+            assertEquals(listOf("fresh"), events.results)
+            assertEquals("fresh", listener.partial.value)
+
+            listener.cancel()
+            assertEquals(0f, listener.level.value)
+            assertEquals("", listener.partial.value)
+        }
+
     private fun listener(
         scope: CoroutineScope,
         events: Events,
@@ -242,6 +371,48 @@ private class FakeCapture(
             lock.notifyAll()
         }
         closedLatch.countDown()
+    }
+}
+
+/** A microphone whose chunks arrive only when the test sends them. */
+private class GatedCapture : PcmCapture {
+    private val lock = Object()
+    private val queued = ArrayDeque<ShortArray>()
+    private var stopped = false
+    private var closedFlag = false
+
+    fun send(chunk: ShortArray) {
+        synchronized(lock) {
+            queued.addLast(chunk)
+            lock.notifyAll()
+        }
+    }
+
+    override fun start() = Unit
+
+    override fun read(destination: ShortArray): Int {
+        synchronized(lock) {
+            while (!stopped && !closedFlag && queued.isEmpty()) lock.wait()
+            if (stopped || closedFlag) return -1
+            val chunk = queued.removeFirst()
+            chunk.copyInto(destination, 0, 0, minOf(chunk.size, destination.size))
+            return chunk.size
+        }
+    }
+
+    override fun stop() {
+        synchronized(lock) {
+            stopped = true
+            lock.notifyAll()
+        }
+    }
+
+    override fun close() {
+        synchronized(lock) {
+            closedFlag = true
+            stopped = true
+            lock.notifyAll()
+        }
     }
 }
 

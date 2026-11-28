@@ -18,7 +18,12 @@ import dev.loosewire.hermeslight.ui.common.BindScreenWheel
 import dev.loosewire.hermeslight.ui.common.HintLine
 import dev.loosewire.hermeslight.ui.common.consumeBackKey
 
-/** Uses the SDK keyboard in the current screen; leaving the editor preserves the draft. */
+/**
+ * Uses the SDK keyboard in the current screen. SAVE and Back both write the draft and close
+ * without submitting; the text then waits in the composer for an explicit Send. A live voice
+ * take takes over the content area while the wheel binding and [androidx.compose.foundation.text.input.TextFieldState]
+ * stay mounted, so release appends to the draft instead of sending.
+ */
 @Composable
 fun ComposerEditor(
     state: ThreadUi,
@@ -27,12 +32,11 @@ fun ComposerEditor(
 ) {
     val text = rememberTextFieldState(state.composer)
     val keyboard = rememberKeyboardOptions()
-    val submitted = remember { BooleanArray(1) }
     val currentActions = rememberUpdatedState(actions)
     DisposableEffect(Unit) {
         onDispose {
             currentActions.value.onHoldCancel()
-            if (!submitted[0]) currentActions.value.onDraftChange(text.text.toString())
+            currentActions.value.onDraftChange(text.text.toString())
         }
     }
     LaunchedEffect(state.composer) {
@@ -43,26 +47,26 @@ fun ComposerEditor(
     LaunchedEffect(text) {
         snapshotFlow { text.text.toString() }.collect { currentActions.value.onDraftChange(it) }
     }
+
+    val voiceActive = state.voicePhase != VoicePhase.Idle
+    val listening = state.voicePhase == VoicePhase.Listening
+
+    fun save() {
+        actions.onDraftChange(text.text.toString())
+        onClose()
+    }
+
     BindScreenWheel(
-        onClick = {
-            if (state.running) {
-                actions.onAction("stop")
-            } else {
-                submitted[0] = true
-                actions.onSubmit(text.text.toString())
-                onClose()
-            }
-        },
+        onClick = { if (!voiceActive) save() },
+        onUp = { if (listening) actions.onHoldCancel() },
+        onDown = { if (listening) actions.onHoldCancel() },
         onHoldStart = {
             actions.onDraftChange(text.text.toString())
             actions.onHoldStart()
         },
         onHoldEnd = {
             actions.onDraftChange(text.text.toString())
-            actions.onHoldSendAndClose {
-                submitted[0] = true
-                onClose()
-            }
+            actions.onHoldEnd()
         },
         onHoldCancel = actions.onHoldCancel,
     )
@@ -70,23 +74,27 @@ fun ComposerEditor(
         Modifier
             .fillMaxSize()
             .background(LightThemeTokens.colors.background)
-            .consumeBackKey(onClose),
+            .consumeBackKey { save() },
     ) {
-        state.voiceFeedback?.let { HintLine(it) }
-        LightTextInputEditor(
-            title = if (state.running) "Queue message" else "Message",
-            state = text,
-            onSubmit = {
-                submitted[0] = true
-                val value = it.toString()
-                actions.onSubmit(value)
-                onClose()
-            },
-            onBack = onClose,
-            keyboardOptionsFlow = keyboard,
-            submitLabel = if (state.running) "QUEUE" else "SEND",
-            singleLine = false,
-            modifier = Modifier.weight(1f),
-        )
+        if (voiceActive) {
+            ListeningPanel(
+                phase = state.voicePhase,
+                level = state.voiceLevel,
+                partial = state.voicePartial,
+                modifier = Modifier.weight(1f),
+            )
+        } else {
+            state.voiceFeedback?.let { HintLine(it) }
+            LightTextInputEditor(
+                title = "Message",
+                state = text,
+                onSubmit = { save() },
+                onBack = { save() },
+                keyboardOptionsFlow = keyboard,
+                submitLabel = "SAVE",
+                singleLine = false,
+                modifier = Modifier.weight(1f),
+            )
+        }
     }
 }

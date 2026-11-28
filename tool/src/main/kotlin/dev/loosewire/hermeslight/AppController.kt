@@ -91,6 +91,7 @@ internal data class AppState(
     val conversations: Map<String, Conversation> = emptyMap(),
     val sessionsRequired: Boolean = false,
     val voiceFeedback: String? = null,
+    val voiceState: Listener.State = Listener.State.Idle,
 )
 
 /** One foreground connection owner shared by the SDK screen stack. No network work in Compose. */
@@ -124,7 +125,11 @@ internal class AppController(
     private val saveMutex = Mutex()
     private var handshake: CompletableDeferred<Unit>? = null
     private var voice: Listener? = null
-    private var voiceAfterResult: (() -> Unit)? = null
+    private var voiceTelemetry: Job? = null
+    private val mutableVoiceLevel = MutableStateFlow(0f)
+    val voiceLevel = mutableVoiceLevel.asStateFlow()
+    private val mutableVoicePartial = MutableStateFlow("")
+    val voicePartial = mutableVoicePartial.asStateFlow()
     private val gateway =
         Gateway(
             scope,
@@ -736,12 +741,11 @@ internal class AppController(
                     val line =
                         when (state) {
                             Listener.State.Idle -> null
-                            Listener.State.Listening -> "listening"
-                            Listener.State.Transcribing -> "transcribing…"
+                            Listener.State.Listening, Listener.State.Transcribing -> null
                             Listener.State.NoSpeech -> "no speech"
                             Listener.State.Error -> "transcription needs the dashboard"
                         }
-                    mutable.update { it.copy(voiceFeedback = line) }
+                    mutable.update { it.copy(voiceState = state, voiceFeedback = line) }
                 },
                 onResult = { transcript ->
                     val previous =
@@ -750,27 +754,30 @@ internal class AppController(
                             .orEmpty()
                     val text = if (previous.isBlank()) transcript else "${previous.trimEnd()} $transcript"
                     editDraft(session, text)
-                    val after = voiceAfterResult
-                    voiceAfterResult = null
-                    if (after != null) {
-                        submit(session, text)
-                        after()
-                    }
                 },
-            ).also { it.start() }
+            ).also { listener ->
+                voiceTelemetry =
+                    scope.launch {
+                        launch { listener.level.collect { mutableVoiceLevel.value = it } }
+                        launch { listener.partial.collect { mutableVoicePartial.value = it } }
+                    }
+                listener.start()
+            }
     }
 
-    /** Ordinary release inserts into the draft; the editor explicitly opts into send-and-close. */
-    fun releaseVoice(afterSend: (() -> Unit)? = null) {
-        voiceAfterResult = afterSend
+    /** Release finishes dictation into the draft; sending always requires a separate action. */
+    fun releaseVoice() {
         voice?.release()
     }
 
     fun cancelVoice() {
-        voiceAfterResult = null
         voice?.cancel()
         voice = null
-        mutable.update { it.copy(voiceFeedback = null) }
+        voiceTelemetry?.cancel()
+        voiceTelemetry = null
+        mutableVoiceLevel.value = 0f
+        mutableVoicePartial.value = ""
+        mutable.update { it.copy(voiceState = Listener.State.Idle, voiceFeedback = null) }
     }
 
     fun editDraft(
@@ -875,7 +882,6 @@ internal class AppController(
     ) {
         val conversation = mutable.value.conversations[session] ?: Conversation(running = session in mutable.value.liveSessions)
         when {
-            action == "send" -> submit(session, conversation.composer)
             action == "stop" -> stop(session)
             action.startsWith("retry:") -> {
                 val id = action.removePrefix("retry:")

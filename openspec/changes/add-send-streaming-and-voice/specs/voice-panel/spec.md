@@ -25,6 +25,11 @@ the partial transcript as it accumulates (windows stitched so far), and one hint
 - **WHEN** the user releases after a take
 - **THEN** the panel switches to a `transcribing…` state, then the final text appears in the composer and the thread returns
 
+#### Scenario: Turn to cancel
+
+- **WHEN** the user turns the wheel while holding
+- **THEN** the panel disappears immediately, telemetry resets, the previous draft remains unchanged, and no prompt is submitted
+
 ### Requirement: A real text field for the composer
 
 The thread's composer SHALL be the SDK's own text input (`LightTextField` opening
@@ -41,6 +46,11 @@ composer MUST hold multi-line text and preserve a draft across navigation.
 
 - **WHEN** the user leaves the thread and returns
 - **THEN** the unfinished draft is still there
+
+#### Scenario: Dictate from the editor
+
+- **WHEN** the user holds and releases the wheel inside the SDK editor
+- **THEN** the same listening/transcribing panel appears, the final text returns to the editor without sending, and SAVE returns to the composer with Send focused
 
 ### Requirement: Quiet status when nothing is known
 
