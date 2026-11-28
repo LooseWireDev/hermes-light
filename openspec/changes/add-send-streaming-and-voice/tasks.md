@@ -193,3 +193,14 @@ otherwise both copies could run. Missing receipts, unconfirmed cancellation and 
 outcomes are visibly unknown, not a blind retry. These boxes record implementation, not device
 acceptance; this task forbids adb/emulator use. Version remains **107 / 0.2.3**. Local gate results
 and the remaining live-dashboard boundary are recorded in `evidence.md`.
+
+## 16. New chats from the phone + 4090 honesty (blocker found while verifying)
+
+Device log: `rpc prompt.submit failed: code=4090 "This chat is open in another window/terminal. Use it
+there, or start a new chat here."` — the dashboard refuses a turn on a session another window has open.
+The app has no way to start a new chat, so there is nowhere to go when this fires.
+
+- [ ] 16.1 `session.create {source: "desktop", title?, profile?}` → `{session_id, stored_session_id}`; the created session becomes the open thread with the composer focused.
+- [ ] 16.2 The Sessions `New session` row creates one for real (no more "create on desktop for now").
+- [ ] 16.3 On `4090` (session open elsewhere) the failed prompt row reads `open in another window` with an action `start a new chat here` that creates a session and submits the same text there; the original text is never lost.
+- [ ] 16.4 Unit tests: create → open path, 4090 → create-and-resubmit, and text retention through the recovery.
