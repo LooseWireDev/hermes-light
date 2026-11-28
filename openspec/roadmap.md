@@ -34,9 +34,11 @@ Long-thread paging, search over sessions, notification of replies while backgrou
 policy allows), setup hardening (password + token modes), install/release path (own keystore,
 sideload via the owner's tools).
 
-`add-history-management` implements loaded-history search, in-place rename and confirmed deletion
-for 0.2.4 / code 108. Actions stay inside Sessions; no seventh navigation destination. LP3 layout,
-wheel and live-dashboard acceptance remain pending (no adb/emulator in this implementation task).
+`add-history-management` adds server-wide search (two-character minimum, loaded-history fallback)
+and snapshot-fenced, confirmed-only rename/deletion for 0.2.4 / code 108. Actions stay inside
+Sessions; no seventh navigation destination. Alpha8 device testing confirmed search/sheet/error
+interaction but exposed unfenced mutation rejection and page-local search. Task group 5 addresses
+those contracts; new live-dashboard and LP3 acceptance remain pending (no adb/emulator in this task).
 
 ## Standing constraints
 

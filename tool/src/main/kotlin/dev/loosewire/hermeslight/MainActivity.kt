@@ -352,8 +352,8 @@ private fun SimpleLightScreen<Unit>.Surface(
                     )
                 route == Route.Sessions -> {
                     val rows =
-                        remember(state.sessions, state.sessionsQuery, state.liveSessions) {
-                            state.sessionRows(System.currentTimeMillis(), filterSessions(state.sessions, state.sessionsQuery))
+                        remember(state.sessions, state.sessionsQuery, state.sessionsSearch, state.liveSessions) {
+                            state.sessionRows(System.currentTimeMillis(), state.visibleSessions())
                         }
                     SessionsScreen(
                         SessionsUi(
@@ -361,12 +361,12 @@ private fun SimpleLightScreen<Unit>.Surface(
                             profileId = state.selectedBot,
                             selectedSessionId = state.selectedSession,
                             position = position.list,
-                            hasMore = state.sessionsHaveMore,
-                            loading = state.sessionsLoading,
+                            hasMore = state.sessionsSearch == null && state.sessionsHaveMore,
+                            loading = state.sessionsSearchLoading || (state.sessionsSearch == null && state.sessionsLoading),
                             loadError = state.operationError,
                             creating = state.creatingSession,
                             query = state.sessionsQuery,
-                            totalCount = state.sessions.size,
+                            totalCount = state.sessionSearchTotal(),
                             action = state.historyAction,
                             actionBusy = state.historyBusy,
                             actionError = state.historyError,

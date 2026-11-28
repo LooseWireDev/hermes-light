@@ -162,7 +162,10 @@ internal fun AppState.threadUi(): ThreadUi {
         }
     return ThreadUi(
         sessionId = selectedSession,
-        title = sessions.firstOrNull { it.id == selectedSession }?.title ?: "Thread",
+        title =
+            sessionsSearch?.sessions?.firstOrNull { it.id == selectedSession }?.title
+                ?: sessions.firstOrNull { it.id == selectedSession }?.title
+                ?: "Thread",
         botName = bots.firstOrNull { it.id == selectedBot }?.name ?: "June",
         messages = if (selectedSession == null) rows else rows + conversation.liveRows(),
         notices = notices,

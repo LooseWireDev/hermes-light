@@ -38,7 +38,7 @@ import kotlinx.coroutines.flow.filter
 
 private const val PAGING_THROTTLE_MS = 250L
 
-/** Loaded history, filtered locally; wheel hold opens the same actions as touch long-press. */
+/** Searchable history; wheel hold opens the same actions as touch long-press. */
 @Composable
 fun SessionsScreen(
     state: SessionsUi,
@@ -236,8 +236,8 @@ fun SessionsScreen(
             }
 
             when {
-                state.query.isNotEmpty() && state.sessions.isEmpty() -> HintLine("no sessions match")
                 state.loading && state.sessions.isEmpty() -> HintLine("loading sessions…")
+                state.query.isNotEmpty() && state.sessions.isEmpty() -> HintLine("no sessions match")
                 state.loadError != null -> HintLine(state.loadError)
                 state.sessions.isEmpty() -> HintLine("No sessions yet · turn up for New session")
             }
@@ -302,8 +302,8 @@ fun SessionsScreen(
             }
 
             if (state.loading && state.sessions.isNotEmpty()) {
-                HintLine("loading more…")
-            } else if (!state.hasMore && state.sessions.isNotEmpty()) {
+                HintLine(if (state.query.isNotEmpty()) "searching…" else "loading more…")
+            } else if (!state.hasMore && state.sessions.isNotEmpty() && state.sessions.size >= state.totalCount) {
                 HintLine("end of sessions")
             }
         }

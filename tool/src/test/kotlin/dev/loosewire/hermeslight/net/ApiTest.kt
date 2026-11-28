@@ -6,13 +6,17 @@
 package dev.loosewire.hermeslight.net
 
 import kotlinx.coroutines.runBlocking
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import java.util.Collections
+import java.util.UUID
 import java.util.concurrent.atomic.AtomicInteger
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertFalse
+import kotlin.test.assertNotEquals
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
@@ -148,18 +152,34 @@ class ApiTest {
         }
 
     @Test
-    fun `rename session patches one encoded id with title through the proxy prefix`() =
-        runBlocking {
+    fun `rename session reads the mutation snapshot and patches its encoded id with mixed counters`() =
+        runBlocking<Unit> {
             val requests = Collections.synchronizedList(mutableListOf<String>())
+            var patched: JsonObject? = null
+            var snapshotAuthorization: String? = null
+            var patchAuthorization: String? = null
             TestHttpServer { exchange ->
                 requests.add("${exchange.method} ${exchange.requestURI.rawPath}")
-                assertEquals("Bearer session-token", exchange.requestHeaders.getFirst("Authorization"))
-                val contentType = exchange.requestHeaders.getFirst("Content-Type").orEmpty()
-                assertTrue(contentType.startsWith("application/json"))
-                val payload = hermesJson.parseToJsonElement(exchange.bodyText()).jsonObject
-                assertEquals(setOf("title"), payload.keys)
-                assertEquals("Renamed / title", payload["title"]?.jsonPrimitive?.content)
-                exchange.respondEmpty(204)
+                when {
+                    exchange.requestURI.path.endsWith("/mutation-snapshot") -> {
+                        snapshotAuthorization = exchange.requestHeaders.getFirst("Authorization")
+                        exchange.respondJson(
+                            200,
+                            """{"session_id":"stored/branch %?#","exists":true,"runtime_revision":"41","runtime_generation":7}""",
+                        )
+                    }
+
+                    exchange.method == "PATCH" -> {
+                        patchAuthorization = exchange.requestHeaders.getFirst("Authorization")
+                        val contentType = exchange.requestHeaders.getFirst("Content-Type").orEmpty()
+                        assertTrue(contentType.startsWith("application/json"))
+                        assertNull(exchange.requestURI.rawQuery)
+                        patched = hermesJson.parseToJsonElement(exchange.bodyText()).jsonObject
+                        exchange.respondEmpty(204)
+                    }
+
+                    else -> exchange.respondEmpty(404)
+                }
             }.use { server ->
                 Api(newHttpClient(), tokenProvider = { "session-token" }).renameSession(
                     endpoint = Endpoint.parse("${server.baseUrl}dash/"),
@@ -167,41 +187,86 @@ class ApiTest {
                     title = "Renamed / title",
                 )
                 assertEquals(
-                    listOf("PATCH /dash/api/sessions/stored%2Fbranch%20%25%3F%23"),
+                    listOf(
+                        "GET /dash/api/sessions/stored%2Fbranch%20%25%3F%23/mutation-snapshot",
+                        "PATCH /dash/api/sessions/stored%2Fbranch%20%25%3F%23",
+                    ),
                     requests.toList(),
                 )
             }
+            assertEquals("Bearer session-token", snapshotAuthorization)
+            assertEquals("Bearer session-token", patchAuthorization)
+            val payload = checkNotNull(patched)
+            assertEquals(setOf("title", "request_id", "expected_revision", "expected_generation"), payload.keys)
+            assertEquals("Renamed / title", payload.getValue("title").jsonPrimitive.content)
+            assertTrue(payload.getValue("expected_revision").jsonPrimitive.isString)
+            assertEquals("41", payload.getValue("expected_revision").jsonPrimitive.content)
+            assertFalse(payload.getValue("expected_generation").jsonPrimitive.isString)
+            assertEquals("7", payload.getValue("expected_generation").jsonPrimitive.content)
+            UUID.fromString(payload.getValue("request_id").jsonPrimitive.content)
         }
 
     @Test
-    fun `delete session sends DELETE with an empty body and accepts 204`() =
-        runBlocking {
+    fun `delete session reads the mutation snapshot and sends fenced query counters`() =
+        runBlocking<Unit> {
             val requests = Collections.synchronizedList(mutableListOf<String>())
+            var observedQuery: Map<String, String> = emptyMap()
             TestHttpServer { exchange ->
                 requests.add("${exchange.method} ${exchange.requestURI.rawPath}")
-                assertEquals("", exchange.bodyText())
-                assertNull(exchange.requestHeaders.getFirst("Authorization"))
-                exchange.respondEmpty(204)
+                when {
+                    exchange.requestURI.path.endsWith("/mutation-snapshot") ->
+                        exchange.respondJson(
+                            200,
+                            """{"session_id":"stored/branch %?#","exists":true,"runtime_revision":42,"runtime_generation":"9"}""",
+                        )
+
+                    exchange.method == "DELETE" -> {
+                        observedQuery = queryParameters(exchange.requestURI)
+                        assertEquals("", exchange.bodyText())
+                        assertNull(exchange.requestHeaders.getFirst("Authorization"))
+                        exchange.respondEmpty(204)
+                    }
+
+                    else -> exchange.respondEmpty(404)
+                }
             }.use { server ->
                 Api(newHttpClient()).deleteSession(
                     endpoint = Endpoint.parse("${server.baseUrl}dash/"),
                     id = "stored/branch %?#",
                 )
                 assertEquals(
-                    listOf("DELETE /dash/api/sessions/stored%2Fbranch%20%25%3F%23"),
+                    listOf(
+                        "GET /dash/api/sessions/stored%2Fbranch%20%25%3F%23/mutation-snapshot",
+                        "DELETE /dash/api/sessions/stored%2Fbranch%20%25%3F%23",
+                    ),
                     requests.toList(),
                 )
             }
+            assertEquals(setOf("request_id", "expected_revision", "expected_generation"), observedQuery.keys)
+            assertEquals("42", observedQuery["expected_revision"])
+            assertEquals("9", observedQuery["expected_generation"])
+            UUID.fromString(observedQuery.getValue("request_id"))
         }
 
     @Test
     fun `session mutations propagate dashboard failures and never report success early`() =
         runBlocking {
-            var status = 500
-            val requests = AtomicInteger(0)
+            var mutationStatus = 500
+            val requests = Collections.synchronizedList(mutableListOf<String>())
             TestHttpServer { exchange ->
-                requests.incrementAndGet()
-                exchange.respondEmpty(status)
+                requests.add("${exchange.method} ${exchange.requestURI.rawPath}")
+                when {
+                    exchange.requestURI.path.endsWith("/mutation-snapshot") ->
+                        exchange.respondJson(
+                            200,
+                            """{"exists":true,"runtime_revision":3,"runtime_generation":1}""",
+                        )
+
+                    exchange.method == "PATCH" || exchange.method == "DELETE" ->
+                        exchange.respondEmpty(mutationStatus)
+
+                    else -> exchange.respondEmpty(404)
+                }
             }.use { server ->
                 val endpoint = Endpoint.parse(server.baseUrl)
                 val api = Api(newHttpClient())
@@ -213,15 +278,266 @@ class ApiTest {
                 assertEquals(ApiErrorKind.HTTP, renameFailure.kind)
                 assertEquals(500, renameFailure.httpCode)
 
-                status = 403
+                mutationStatus = 403
                 val deleteFailure =
                     assertFailsWith<ApiException> {
                         api.deleteSession(endpoint, "s1")
                     }
                 assertEquals(ApiErrorKind.UNAUTHORIZED, deleteFailure.kind)
                 assertEquals(403, deleteFailure.httpCode)
-                assertEquals(2, requests.get())
+                assertEquals(2, requests.toList().count { !it.startsWith("GET") })
             }
+        }
+
+    @Test
+    fun `rename retries once with a fresh snapshot and request id after client_upgrade_required`() =
+        runBlocking {
+            val snapshots = Collections.synchronizedList(mutableListOf<Int>())
+            val revisions = Collections.synchronizedList(mutableListOf<String>())
+            val requestIds = Collections.synchronizedList(mutableListOf<String>())
+            val patchCount = AtomicInteger(0)
+            TestHttpServer { exchange ->
+                when {
+                    exchange.requestURI.path.endsWith("/mutation-snapshot") -> {
+                        val revision = snapshots.size + 11
+                        snapshots.add(revision)
+                        exchange.respondJson(
+                            200,
+                            """{"exists":true,"runtime_revision":$revision,"runtime_generation":2}""",
+                        )
+                    }
+
+                    exchange.method == "PATCH" -> {
+                        val attempt = patchCount.incrementAndGet()
+                        val payload = hermesJson.parseToJsonElement(exchange.bodyText()).jsonObject
+                        requestIds.add(payload.getValue("request_id").jsonPrimitive.content)
+                        revisions.add(payload.getValue("expected_revision").jsonPrimitive.content)
+                        if (attempt == 1) {
+                            exchange.respondJson(409, """{"detail":"client_upgrade_required"}""")
+                        } else {
+                            exchange.respondEmpty(204)
+                        }
+                    }
+
+                    else -> exchange.respondEmpty(404)
+                }
+            }.use { server ->
+                Api(newHttpClient()).renameSession(Endpoint.parse(server.baseUrl), "s1", "New title")
+            }
+            assertEquals(listOf(11, 12), snapshots.toList())
+            assertEquals(2, patchCount.get())
+            assertEquals(listOf("11", "12"), revisions.toList())
+            assertNotEquals(requestIds[0], requestIds[1])
+            requestIds.forEach { UUID.fromString(it) }
+        }
+
+    @Test
+    fun `delete retries once after client_upgrade_required and keeps counters in the query`() =
+        runBlocking {
+            val snapshotCount = AtomicInteger(0)
+            val deleteCount = AtomicInteger(0)
+            val requestIds = Collections.synchronizedList(mutableListOf<String>())
+            TestHttpServer { exchange ->
+                when {
+                    exchange.requestURI.path.endsWith("/mutation-snapshot") -> {
+                        val revision = snapshotCount.incrementAndGet() + 20
+                        exchange.respondJson(
+                            200,
+                            """{"exists":true,"runtime_revision":"$revision","runtime_generation":4}""",
+                        )
+                    }
+
+                    exchange.method == "DELETE" -> {
+                        val attempt = deleteCount.incrementAndGet()
+                        requestIds.add(queryParameters(exchange.requestURI).getValue("request_id"))
+                        if (attempt == 1) {
+                            exchange.respondJson(409, """{"detail":{"code":"client_upgrade_required"}}""")
+                        } else {
+                            exchange.respondEmpty(204)
+                        }
+                    }
+
+                    else -> exchange.respondEmpty(404)
+                }
+            }.use { server ->
+                Api(newHttpClient()).deleteSession(Endpoint.parse(server.baseUrl), "s1")
+            }
+            assertEquals(2, snapshotCount.get())
+            assertEquals(2, deleteCount.get())
+            assertNotEquals(requestIds[0], requestIds[1])
+            requestIds.forEach { UUID.fromString(it) }
+        }
+
+    @Test
+    fun `two relevant conflicts report changed elsewhere without a third attempt`() =
+        runBlocking {
+            for (operation in listOf("rename", "delete")) {
+                val snapshots = AtomicInteger(0)
+                val mutations = AtomicInteger(0)
+                TestHttpServer { exchange ->
+                    when {
+                        exchange.requestURI.path.endsWith("/mutation-snapshot") -> {
+                            snapshots.incrementAndGet()
+                            exchange.respondJson(200, """{"exists":true,"runtime_revision":1}""")
+                        }
+
+                        operation == "rename" && exchange.method == "PATCH" ||
+                            operation == "delete" && exchange.method == "DELETE" -> {
+                            mutations.incrementAndGet()
+                            exchange.respondJson(409, """{"detail":"client_upgrade_required"}""")
+                        }
+
+                        else -> exchange.respondEmpty(404)
+                    }
+                }.use { server ->
+                    val endpoint = Endpoint.parse(server.baseUrl)
+                    val api = Api(newHttpClient())
+                    val failure =
+                        assertFailsWith<ApiException> {
+                            if (operation == "rename") {
+                                api.renameSession(endpoint, "s1", "New title")
+                            } else {
+                                api.deleteSession(endpoint, "s1")
+                            }
+                        }
+                    assertEquals("changed elsewhere — retry", failure.message)
+                    assertEquals(ApiErrorKind.HTTP, failure.kind)
+                    assertEquals(409, failure.httpCode)
+                }
+                assertEquals(2, snapshots.get(), operation)
+                assertEquals(2, mutations.get(), operation)
+            }
+        }
+
+    @Test
+    fun `missing, malformed, or stale mutation snapshots never send an unfenced mutation`() =
+        runBlocking {
+            val cases =
+                listOf(
+                    """{"exists":false,"runtime_revision":1}""" to ApiErrorKind.HTTP,
+                    "{}" to ApiErrorKind.INVALID_RESPONSE,
+                    """{"exists":true}""" to ApiErrorKind.INVALID_RESPONSE,
+                    """{"exists":true,"runtime_revision":{"value":1}}""" to ApiErrorKind.INVALID_RESPONSE,
+                    """{"exists":true,"runtime_revision":"soon"}""" to ApiErrorKind.INVALID_RESPONSE,
+                    """{"exists":true,"runtime_revision":1,"runtime_generation":"later"}""" to
+                        ApiErrorKind.INVALID_RESPONSE,
+                )
+            for ((snapshotBody, expectedKind) in cases) {
+                val mutations = AtomicInteger(0)
+                TestHttpServer { exchange ->
+                    when {
+                        exchange.requestURI.path.endsWith("/mutation-snapshot") ->
+                            exchange.respondJson(200, snapshotBody)
+
+                        exchange.method == "PATCH" || exchange.method == "DELETE" -> {
+                            mutations.incrementAndGet()
+                            exchange.respondEmpty(204)
+                        }
+
+                        else -> exchange.respondEmpty(404)
+                    }
+                }.use { server ->
+                    val failure =
+                        assertFailsWith<ApiException> {
+                            Api(newHttpClient()).renameSession(
+                                Endpoint.parse(server.baseUrl),
+                                "s1",
+                                "New title",
+                            )
+                        }
+                    assertEquals(expectedKind, failure.kind, snapshotBody)
+                    if (expectedKind == ApiErrorKind.HTTP) assertEquals(404, failure.httpCode)
+                    assertEquals(0, mutations.get(), snapshotBody)
+                }
+            }
+
+            val hugeRevision = "184467440737095516160"
+            for (generation in listOf(null, hugeRevision)) {
+                val snapshot =
+                    if (generation == null) {
+                        """{"exists":true,"runtime_revision":"$hugeRevision"}"""
+                    } else {
+                        """{"exists":true,"runtime_revision":"$hugeRevision","runtime_generation":"$generation"}"""
+                    }
+                var patched: JsonObject? = null
+                TestHttpServer { exchange ->
+                    when {
+                        exchange.requestURI.path.endsWith("/mutation-snapshot") ->
+                            exchange.respondJson(200, snapshot)
+
+                        exchange.method == "PATCH" -> {
+                            patched = hermesJson.parseToJsonElement(exchange.bodyText()).jsonObject
+                            exchange.respondEmpty(204)
+                        }
+
+                        else -> exchange.respondEmpty(404)
+                    }
+                }.use { server ->
+                    Api(newHttpClient()).renameSession(
+                        Endpoint.parse(server.baseUrl),
+                        "s1",
+                        "New title",
+                    )
+                }
+                val payload = checkNotNull(patched)
+                assertTrue(payload.getValue("expected_revision").jsonPrimitive.isString)
+                assertEquals(hugeRevision, payload.getValue("expected_revision").jsonPrimitive.content)
+                assertEquals(generation, payload["expected_generation"]?.jsonPrimitive?.content, snapshot)
+            }
+
+            val mutations = AtomicInteger(0)
+            TestHttpServer { exchange ->
+                when {
+                    exchange.requestURI.path.endsWith("/mutation-snapshot") -> exchange.respondEmpty(404)
+                    else -> {
+                        mutations.incrementAndGet()
+                        exchange.respondEmpty(204)
+                    }
+                }
+            }.use { server ->
+                val failure =
+                    assertFailsWith<ApiException> {
+                        Api(newHttpClient()).deleteSession(Endpoint.parse(server.baseUrl), "s1")
+                    }
+                assertEquals(ApiErrorKind.HTTP, failure.kind)
+                assertEquals(404, failure.httpCode)
+                assertEquals(0, mutations.get())
+            }
+        }
+
+    @Test
+    fun `unrelated conflicts are not retried`() =
+        runBlocking {
+            val snapshots = AtomicInteger(0)
+            val mutations = AtomicInteger(0)
+            TestHttpServer { exchange ->
+                when {
+                    exchange.requestURI.path.endsWith("/mutation-snapshot") -> {
+                        snapshots.incrementAndGet()
+                        exchange.respondJson(200, """{"exists":true,"runtime_revision":1}""")
+                    }
+
+                    exchange.method == "PATCH" -> {
+                        mutations.incrementAndGet()
+                        exchange.respondJson(409, """{"detail":"title_conflict"}""")
+                    }
+
+                    else -> exchange.respondEmpty(404)
+                }
+            }.use { server ->
+                val failure =
+                    assertFailsWith<ApiException> {
+                        Api(newHttpClient()).renameSession(
+                            Endpoint.parse(server.baseUrl),
+                            "s1",
+                            "New title",
+                        )
+                    }
+                assertEquals(ApiErrorKind.HTTP, failure.kind)
+                assertEquals(409, failure.httpCode)
+            }
+            assertEquals(1, snapshots.get())
+            assertEquals(1, mutations.get())
         }
 
     @Test
@@ -573,6 +889,234 @@ class ApiTest {
                 val failure =
                     assertFailsWith<ApiException> {
                         Api(newHttpClient()).sessions(Endpoint.parse(server.baseUrl))
+                    }
+                assertEquals(ApiErrorKind.INVALID_RESPONSE, failure.kind)
+            }
+        }
+
+    @Test
+    fun `session search maps the sessions envelope with the true total and scoped query`() =
+        runBlocking {
+            var observedQuery: Map<String, String> = emptyMap()
+            var rawQuery: String? = null
+            var authorization: String? = null
+            TestHttpServer { exchange ->
+                if (exchange.requestURI.path == "/dash/api/sessions/search") {
+                    observedQuery = queryParameters(exchange.requestURI)
+                    rawQuery = exchange.requestURI.rawQuery
+                    authorization = exchange.requestHeaders.getFirst("Authorization")
+                    exchange.respondJson(
+                        200,
+                        """
+                        {
+                          "sessions": [
+                            {
+                              "id": "s1",
+                              "title": "One",
+                              "source": "june",
+                              "profile": "june",
+                              "message_count": "2",
+                              "last_active": 1700000000,
+                              "pinned": 1
+                            },
+                            {"id": "", "title": "ignored"},
+                            {"id": "s2", "display_name": "Forge", "last_activity_at": "1700000123000"}
+                          ],
+                          "total": 801,
+                          "limit": 2,
+                          "offset": 4
+                        }
+                        """.trimIndent(),
+                    )
+                } else {
+                    exchange.respondEmpty(404)
+                }
+            }.use { server ->
+                val page =
+                    Api(newHttpClient(), tokenProvider = { "search-token" }).searchSessions(
+                        endpoint = Endpoint.parse("${server.baseUrl}dash/"),
+                        query = "needle & thread / 2",
+                        limit = 2,
+                        offset = 4,
+                        profile = "june",
+                        source = "june",
+                    )
+                assertEquals(2, page.sessions.size)
+                assertEquals("s1", page.sessions[0].id)
+                assertEquals("One", page.sessions[0].title)
+                assertEquals("june", page.sessions[0].profile)
+                assertEquals(2, page.sessions[0].messageCount)
+                assertTrue(page.sessions[0].pinned)
+                assertEquals("Forge", page.sessions[1].title)
+                assertEquals(1_700_000_123_000L, page.sessions[1].updatedAtEpochMs)
+                assertEquals(801, page.total)
+                assertEquals(2, page.limit)
+                assertEquals(4, page.offset)
+                assertTrue(page.hasMore)
+            }
+            assertEquals("Bearer search-token", authorization)
+            assertEquals("needle & thread / 2", observedQuery["q"])
+            assertEquals("june", observedQuery["profile"])
+            assertEquals("june", observedQuery["source"])
+            assertEquals("2", observedQuery["limit"])
+            assertEquals("4", observedQuery["offset"])
+            assertNull(observedQuery["exclude_sources"])
+            assertNull(observedQuery["order"])
+            assertTrue(rawQuery.orEmpty().contains("q=needle%20%26%20thread"))
+        }
+
+    @Test
+    fun `session search sessions envelope without a total counts the returned rows`() =
+        runBlocking {
+            var observedQuery: Map<String, String> = emptyMap()
+            TestHttpServer { exchange ->
+                if (exchange.requestURI.path == "/api/sessions/search") {
+                    observedQuery = queryParameters(exchange.requestURI)
+                    exchange.respondJson(200, """{"sessions":[{"id":"s1"},{"id":"s2"}]}""")
+                } else {
+                    exchange.respondEmpty(404)
+                }
+            }.use { server ->
+                val page =
+                    Api(newHttpClient()).searchSessions(
+                        endpoint = Endpoint.parse(server.baseUrl),
+                        query = "50% off?",
+                        limit = 2,
+                    )
+                assertEquals(2, page.total)
+                assertEquals(2, page.sessions.size)
+                assertEquals(2, page.limit)
+                assertEquals(0, page.offset)
+                assertFalse(page.hasMore)
+            }
+            assertEquals("50% off?", observedQuery["q"])
+            assertEquals(1, observedQuery.keys.count { it == "q" })
+        }
+
+    @Test
+    fun `session search maps the reference results envelope, deduplicates hits, and uses its total`() =
+        runBlocking {
+            var observedQuery: Map<String, String> = emptyMap()
+            TestHttpServer { exchange ->
+                if (exchange.requestURI.path == "/dash/api/sessions/search") {
+                    observedQuery = queryParameters(exchange.requestURI)
+                    exchange.respondJson(
+                        200,
+                        """
+                        {
+                          "results": [
+                            {
+                              "session_id": "s1",
+                              "snippet": "needle in a message",
+                              "title": "One",
+                              "source": "june",
+                              "model": "m1",
+                              "session_started": 1700000000,
+                              "last_active": 1700000300,
+                              "message_count": 4,
+                              "archived": false
+                            },
+                            {
+                              "session_id": "s1",
+                              "snippet": "a second matching message",
+                              "title": "One",
+                              "session_started": 1700000000
+                            },
+                            {
+                              "session_id": "s2",
+                              "snippet": "other snippet",
+                              "title": "Two",
+                              "session_started": "1700000400"
+                            }
+                          ],
+                          "has_more": true,
+                          "next_offset": 3,
+                          "total": 9
+                        }
+                        """.trimIndent(),
+                    )
+                } else {
+                    exchange.respondEmpty(404)
+                }
+            }.use { server ->
+                val page =
+                    Api(newHttpClient()).searchSessions(
+                        endpoint = Endpoint.parse("${server.baseUrl}dash/"),
+                        query = "needle",
+                        limit = 3,
+                        profile = "june",
+                    )
+                assertEquals(listOf("s1", "s2"), page.sessions.map { it.id })
+                assertEquals(2, page.sessions.size)
+                assertEquals("One", page.sessions[0].title)
+                assertEquals("june", page.sessions[0].source)
+                assertEquals("m1", page.sessions[0].model)
+                assertEquals("needle in a message", page.sessions[0].preview)
+                assertEquals(4, page.sessions[0].messageCount)
+                assertEquals(1_700_000_300_000L, page.sessions[0].updatedAtEpochMs)
+                assertEquals("other snippet", page.sessions[1].preview)
+                assertEquals(1_700_000_400_000L, page.sessions[1].updatedAtEpochMs)
+                assertEquals(9, page.total)
+                assertEquals(3, page.limit)
+                assertEquals(0, page.offset)
+                assertTrue(page.hasMore)
+            }
+            assertEquals("needle", observedQuery["q"])
+            assertEquals("june", observedQuery["profile"])
+        }
+
+    @Test
+    fun `session search reference results without a total count unique rows and honor has_more`() =
+        runBlocking {
+            TestHttpServer { exchange ->
+                if (exchange.requestURI.path == "/api/sessions/search") {
+                    exchange.respondJson(
+                        200,
+                        """
+                        {
+                          "results": [
+                            {"session_id": "s1", "snippet": "first hit", "session_started": 1700000000},
+                            {"session_id": "s1", "snippet": "second hit"},
+                            {"session_id": "s2", "session_started": 1700000500}
+                          ],
+                          "has_more": true,
+                          "next_offset": 2
+                        }
+                        """.trimIndent(),
+                    )
+                } else {
+                    exchange.respondEmpty(404)
+                }
+            }.use { server ->
+                val page =
+                    Api(newHttpClient()).searchSessions(
+                        endpoint = Endpoint.parse(server.baseUrl),
+                        query = "hit",
+                        limit = 2,
+                    )
+                assertEquals(listOf("s1", "s2"), page.sessions.map { it.id })
+                assertEquals(2, page.total)
+                assertEquals(2, page.limit)
+                assertEquals(0, page.offset)
+                assertTrue(page.hasMore)
+                assertEquals("first hit", page.sessions[0].preview)
+                assertEquals(1_700_000_000_000L, page.sessions[0].updatedAtEpochMs)
+                assertEquals(1_700_000_500_000L, page.sessions[1].updatedAtEpochMs)
+            }
+        }
+
+    @Test
+    fun `session search rejects a response with neither sessions nor results`() =
+        runBlocking {
+            TestHttpServer { exchange ->
+                exchange.respondJson(200, """{"total":5,"has_more":false}""")
+            }.use { server ->
+                val failure =
+                    assertFailsWith<ApiException> {
+                        Api(newHttpClient()).searchSessions(
+                            Endpoint.parse(server.baseUrl),
+                            "needle",
+                        )
                     }
                 assertEquals(ApiErrorKind.INVALID_RESPONSE, failure.kind)
             }

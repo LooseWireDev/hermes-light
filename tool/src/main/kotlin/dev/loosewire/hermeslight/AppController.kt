@@ -3,6 +3,7 @@ package dev.loosewire.hermeslight
 import dev.loosewire.hermeslight.data.AuthMode
 import dev.loosewire.hermeslight.data.Profile
 import dev.loosewire.hermeslight.data.ProfileStore
+import dev.loosewire.hermeslight.data.SessionPage
 import dev.loosewire.hermeslight.data.SessionSummary
 import dev.loosewire.hermeslight.data.TranscriptMessage
 import dev.loosewire.hermeslight.net.Api
@@ -73,6 +74,8 @@ internal data class AppState(
     val sessionsLoading: Boolean = false,
     val sessionsHaveMore: Boolean = false,
     val sessionsQuery: String = "",
+    val sessionsSearch: SessionPage? = null,
+    val sessionsSearchLoading: Boolean = false,
     val historyAction: SessionActionUi? = null,
     val historyBusy: Boolean = false,
     val historyError: String? = null,
@@ -124,6 +127,7 @@ internal class AppController(
     private var sessionsOffset = 0
     private var connectionEpoch = 0
     private var historyJob: Job? = null
+    private var sessionsSearchJob: Job? = null
     private var historyEpoch = 0
     private var sessionListRevision = 0L
     private val client = defaultHttpClient()
@@ -145,6 +149,16 @@ internal class AppController(
             delete = { id ->
                 val saved = profile ?: error("Not connected to the dashboard")
                 api.deleteSession(Endpoint.parse(saved.endpoint), id)
+            },
+            searchRequest = { query ->
+                val saved = profile ?: error("Not connected to the dashboard")
+                val bot = mutable.value.selectedBot
+                api.searchSessions(
+                    endpoint = Endpoint.parse(saved.endpoint),
+                    query = query,
+                    profile = bot?.takeIf { it.startsWith("profile:") }?.removePrefix("profile:"),
+                    source = bot?.takeIf { it.startsWith("source:") }?.removePrefix("source:"),
+                )
             },
             onChanged = { sessionListRevision += 1 },
             onDeleted = ::sessionDeleted,
@@ -242,6 +256,7 @@ internal class AppController(
         botsJob?.cancel()
         menuJob?.cancel()
         historyJob?.cancel()
+        sessionsSearchJob?.cancel()
         history.invalidate()
         refreshJobs.values.forEach { it.cancel() }
         refreshJobs.clear()
@@ -253,6 +268,7 @@ internal class AppController(
             it.copy(
                 connecting = false,
                 sessionsLoading = false,
+                sessionsSearchLoading = false,
                 threadLoading = false,
                 botsLoading = false,
                 historyAction = null,
@@ -285,6 +301,7 @@ internal class AppController(
         botsJob?.cancel()
         menuJob?.cancel()
         historyJob?.cancel()
+        sessionsSearchJob?.cancel()
         history.invalidate()
         mutable.update {
             it.copy(
@@ -292,6 +309,8 @@ internal class AppController(
                 threadLoading = false,
                 botsLoading = false,
                 sessionsQuery = "",
+                sessionsSearch = null,
+                sessionsSearchLoading = false,
                 historyAction = null,
                 historyBusy = false,
                 historyError = null,
@@ -323,12 +342,21 @@ internal class AppController(
     ) {
         val epoch = ++connectionEpoch
         historyJob?.cancel()
+        sessionsSearchJob?.cancel()
         history.invalidate()
         queuedChecks.values.forEach { it.cancel() }
         queuedChecks.clear()
         gateway.disconnect()
         sessionRuntime = null
-        mutable.update { it.copy(connecting = true, status = "connecting…", operationError = null) }
+        mutable.update {
+            it.copy(
+                connecting = true,
+                status = "connecting…",
+                operationError = null,
+                sessionsSearch = null,
+                sessionsSearchLoading = false,
+            )
+        }
         try {
             withTimeout(25_000) {
                 val endpoint = Endpoint.parse(candidate.endpoint)
@@ -421,6 +449,8 @@ internal class AppController(
                         selectedBot = authenticated.botProfile,
                         selectedSession = authenticated.selectedSessionId,
                         sessionsQuery = "",
+                        sessionsSearch = null,
+                        sessionsSearchLoading = false,
                         historyAction = null,
                         historyBusy = false,
                         historyError = null,
@@ -794,6 +824,7 @@ internal class AppController(
         cancelVoice()
         threadJob?.cancel()
         historyJob?.cancel()
+        sessionsSearchJob?.cancel()
         history.invalidate()
         persist { it.copy(botProfile = source, selectedSessionId = null) }
         mutable.update {
@@ -804,6 +835,8 @@ internal class AppController(
                 messages = emptyList(),
                 positionRow = null,
                 sessionsQuery = "",
+                sessionsSearch = null,
+                sessionsSearchLoading = false,
                 historyAction = null,
                 historyBusy = false,
                 historyError = null,
@@ -867,7 +900,14 @@ internal class AppController(
     }
 
     fun searchSessions(query: String) {
+        sessionsSearchJob?.cancel()
         history.search(query)
+        if (query.trim().length < 2) return
+        sessionsSearchJob =
+            scope.launch {
+                delay(250)
+                history.loadSearch(query)
+            }
     }
 
     fun showSessionActions(id: String) {

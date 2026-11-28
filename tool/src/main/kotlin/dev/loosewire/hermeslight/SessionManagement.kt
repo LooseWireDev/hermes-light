@@ -1,9 +1,15 @@
 package dev.loosewire.hermeslight
 
+import dev.loosewire.hermeslight.data.SessionPage
 import dev.loosewire.hermeslight.data.SessionSummary
+import dev.loosewire.hermeslight.net.ApiErrorKind
+import dev.loosewire.hermeslight.net.ApiException
 import dev.loosewire.hermeslight.ui.SessionActionMode
 import dev.loosewire.hermeslight.ui.SessionActionUi
 import kotlinx.coroutines.CancellationException
+
+/** Shortest query worth a dashboard round trip; shorter input stays a local filter. */
+private const val SEARCH_MIN_LENGTH = 2
 
 /**
  * Search, rename and delete transitions for the loaded session list.
@@ -12,6 +18,11 @@ import kotlinx.coroutines.CancellationException
  * dashboard acknowledged the request. Nothing is removed or retitled before then, and a failure
  * leaves the old row intact. [onDeleted] reports an acknowledged removal so the controller can
  * adjust paging and persisted state without reloading the list.
+ *
+ * [search] updates the query synchronously and [loadSearch] fills [AppState.sessionsSearch] from
+ * [searchRequest]. A response is installed only while its query and generation are still current;
+ * an endpoint failure falls back to local title/preview filtering. The controller owns debouncing
+ * and cancelling the coroutine that runs [loadSearch].
  */
 internal class SessionManagement(
     private val state: () -> AppState,
@@ -21,23 +32,72 @@ internal class SessionManagement(
     private val onChanged: () -> Unit = {},
     private val onDeleted: (id: String, selected: Boolean, loaded: Boolean) -> Unit = { _, _, _ -> },
     private val current: () -> Boolean = { true },
+    private val searchRequest: suspend (query: String) -> SessionPage = {
+        throw ApiException("search unavailable on this dashboard", ApiErrorKind.UNSUPPORTED)
+    },
 ) {
     private var operation = 0L
+    private var searchGeneration = 0L
 
-    /** A profile or scope switch makes any in-flight acknowledgement unusable. */
+    /** A profile or scope switch makes any in-flight acknowledgement or search unusable. */
     fun invalidate() {
         operation++
+        searchGeneration++
+        update { it.copy(sessionsSearchLoading = false) }
     }
 
+    /**
+     * Immediately reflects [query] in the text field. A long enough query starts the loading state
+     * and drops the previous server page so local filtering applies until [loadSearch] settles.
+     */
     fun search(query: String) {
-        update { it.copy(sessionsQuery = query) }
+        val searching = query.trim().length >= SEARCH_MIN_LENGTH
+        searchGeneration++
+        update {
+            it.copy(
+                sessionsQuery = query,
+                sessionsSearch = null,
+                sessionsSearchLoading = searching,
+            )
+        }
+    }
+
+    /**
+     * Runs a dashboard search and installs the page only if [query] is still the current one and no
+     * newer search or acknowledged mutation superseded it. Failures leave local filtering in place.
+     * Cancellation always propagates; a cancelled stale load does not touch the loading flag.
+     */
+    suspend fun loadSearch(query: String) {
+        if (state().sessionsQuery != query) return
+        val requested = query.trim()
+        if (requested.length < SEARCH_MIN_LENGTH) {
+            searchGeneration++
+            update { it.copy(sessionsSearch = null, sessionsSearchLoading = false) }
+            return
+        }
+        val token = ++searchGeneration
+        update { it.copy(sessionsSearchLoading = true) }
+        val page =
+            try {
+                searchRequest(requested)
+            } catch (error: CancellationException) {
+                if (token == searchGeneration) update { it.copy(sessionsSearchLoading = false) }
+                throw error
+            } catch (error: Exception) {
+                if (token != searchGeneration) return
+                update { it.copy(sessionsSearch = null, sessionsSearchLoading = false) }
+                return
+            }
+        if (token != searchGeneration || state().sessionsQuery != query) return
+        update { it.copy(sessionsSearch = page, sessionsSearchLoading = false) }
     }
 
     fun showActions(id: String) {
         val opening = state()
         if (opening.historyBusy) return
         val session =
-            opening.sessions.firstOrNull { it.id == id }
+            opening.sessionsSearch?.sessions?.firstOrNull { it.id == id }
+                ?: opening.sessions.firstOrNull { it.id == id }
                 ?: opening.menuSessions.firstOrNull { it.id == id }
                 ?: return
         update {
@@ -80,7 +140,8 @@ internal class SessionManagement(
         try {
             rename(action.id, trimmed)
             if (token != operation || !current()) return
-            update { it.renamedSession(action.id, trimmed) }
+            searchGeneration++
+            update { it.renamedSession(action.id, trimmed).copy(sessionsSearchLoading = false) }
             onChanged()
         } catch (error: CancellationException) {
             throw error
@@ -108,7 +169,8 @@ internal class SessionManagement(
             if (token != operation || !current()) return
             val selected = state().selectedSession == action.id
             val loaded = state().sessions.any { it.id == action.id }
-            update { it.deletedSession(action.id) }
+            searchGeneration++
+            update { it.deletedSession(action.id).copy(sessionsSearchLoading = false) }
             onChanged()
             onDeleted(action.id, selected, loaded)
         } catch (error: CancellationException) {
@@ -150,7 +212,13 @@ internal fun filterSessions(
     }
 }
 
-/** Server-acknowledged rename applied to both the Sessions list and the menu snapshot. */
+/** Rows the Sessions screen renders: the server page when one exists, else local filtering. */
+internal fun AppState.visibleSessions(): List<SessionSummary> = sessionsSearch?.sessions ?: filterSessions(sessions, sessionsQuery)
+
+/** Count shown beside the Sessions screen: the server total while a search page is installed. */
+internal fun AppState.sessionSearchTotal(): Int = sessionsSearch?.total ?: sessions.size
+
+/** Server-acknowledged rename applied to the Sessions list, an active search page and the menu. */
 internal fun AppState.renamedSession(
     id: String,
     title: String,
@@ -158,6 +226,7 @@ internal fun AppState.renamedSession(
     fun List<SessionSummary>.retitled() = map { row -> if (row.id == id) row.copy(title = title) else row }
     return copy(
         sessions = sessions.retitled(),
+        sessionsSearch = sessionsSearch?.let { it.copy(sessions = it.sessions.retitled()) },
         menuSessions = menuSessions.retitled(),
         historyAction = null,
         historyError = null,
@@ -167,11 +236,23 @@ internal fun AppState.renamedSession(
 /**
  * Server-acknowledged delete. Only the acknowledged id leaves the rows; an open thread for that
  * id is closed and related per-session state is dropped. Paging is adjusted by the controller.
+ * A search page loses the row and one from its total only when the acknowledged id is in it.
  */
 internal fun AppState.deletedSession(id: String): AppState {
     val wasSelected = selectedSession == id
     return copy(
         sessions = sessions.filterNot { it.id == id },
+        sessionsSearch =
+            sessionsSearch?.let { page ->
+                if (page.sessions.none { it.id == id }) {
+                    page
+                } else {
+                    page.copy(
+                        sessions = page.sessions.filterNot { it.id == id },
+                        total = (page.total - 1).coerceAtLeast(0),
+                    )
+                }
+            },
         menuSessions = menuSessions.filterNot { it.id == id },
         menuSessionCount = menuSessionCount?.let { (it - 1).coerceAtLeast(0) },
         selectedSession = selectedSession?.takeUnless { it == id },

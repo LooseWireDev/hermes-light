@@ -29,6 +29,7 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import java.io.IOException
+import java.util.UUID
 
 @Serializable
 data class CronJobSummary(
@@ -134,36 +135,59 @@ class Api(
                 ),
             )
         val wire = decode<SessionListWire>(body)
-        val sessions =
-            wire.sessions.mapNotNull { item ->
-                val id = item.id.takeIf { it.isNotBlank() } ?: return@mapNotNull null
-                SessionSummary(
-                    id = id,
-                    title = item.title ?: item.display_name ?: "(untitled)",
-                    source = item.source,
-                    profile = item.profile,
-                    preview = item.preview,
-                    displayName = item.display_name,
-                    model = item.model,
-                    messageCount = item.message_count.asIntOrNull(),
-                    status = item.status,
-                    updatedAtEpochMs =
-                        item.last_active.asEpochMillisOrNull()
-                            ?: item.last_activity_at.asEpochMillisOrNull()
-                            ?: item.started_at.asEpochMillisOrNull(),
-                    unread = item.unread.asLenientBooleanOrNull(),
-                    pinned = item.pinned.asLenientBooleanOrNull() ?: false,
-                    archived = item.archived.asLenientBooleanOrNull() ?: false,
-                )
-            }
+        val sessions = sessionRows(wire)
         val total = wire.total ?: 0
         val pageLimit = wire.limit ?: limit
         val pageOffset = wire.offset ?: offset
+        return SessionPage(
+            sessions = sessions,
+            total = total,
+            limit = pageLimit,
+            offset = pageOffset,
+            hasMore = pageHasMore(total, pageOffset, sessions.size, pageLimit),
+        )
+    }
+
+    /**
+     * Server-wide session search. The dashboard may answer with the list envelope (`sessions`) or
+     * the reference search envelope (`results` + `has_more`); rows map through the same projection,
+     * deduplicated by id. [SessionPage.total] is the response total when supplied, otherwise the
+     * number of unique rows returned.
+     */
+    suspend fun searchSessions(
+        endpoint: Endpoint,
+        query: String,
+        limit: Int = DEFAULT_PAGE_SIZE,
+        offset: Int = 0,
+        profile: String? = null,
+        source: String? = null,
+    ): SessionPage {
+        require(query.isNotBlank()) { "Search query must not be blank" }
+        require(limit in 1..MAX_PAGE_SIZE) { "limit must be between 1 and $MAX_PAGE_SIZE" }
+        require(offset >= 0) { "offset must not be negative" }
+        val body =
+            getJson(
+                endpoint,
+                emptyList(),
+                mapOf(
+                    "q" to query,
+                    "profile" to profile,
+                    "source" to source,
+                    "limit" to limit.toString(),
+                    "offset" to offset.toString(),
+                ),
+                basePath = "api/sessions/search",
+            )
+        val wire = decode<SessionListWire>(body)
+        val sessions = sessionRows(wire)
+        val total = wire.total ?: sessions.size
+        val pageLimit = wire.limit ?: limit
+        val pageOffset = wire.offset ?: offset
         val hasMore =
-            if (total > 0) {
-                pageOffset + sessions.size < total
+            if (wire.total == null && wire.has_more != null) {
+                wire.has_more
             } else {
-                sessions.isNotEmpty() && sessions.size >= pageLimit
+                pageHasMore(total, pageOffset, sessions.size, pageLimit)
             }
         return SessionPage(
             sessions = sessions,
@@ -308,21 +332,30 @@ class Api(
         )
     }
 
-    /** Rename only after the dashboard agrees; callers must not show the title before this returns. */
+    /**
+     * Rename only after the dashboard agrees; callers must not show the title before this returns.
+     * Current dashboards refuse an unfenced PATCH (409 client_upgrade_required), so read the
+     * session's mutation snapshot first and quote its counters.
+     */
     suspend fun renameSession(
         endpoint: Endpoint,
         id: String,
         title: String,
     ) {
-        val payload = buildJsonObject { put("title", title) }.toString()
-        send(
+        sendFencedMutation(endpoint, id) { fence, requestId ->
+            val payload =
+                buildJsonObject {
+                    put("title", title)
+                    put("request_id", requestId)
+                    put("expected_revision", fence.revision)
+                    fence.generation?.let { put("expected_generation", it) }
+                }.toString()
             Request
                 .Builder()
                 .url(sessionUrl(endpoint, id))
                 .header("Accept", "application/json")
                 .patch(payload.toRequestBody("application/json".toMediaType()))
-                .authorize(),
-        )
+        }
     }
 
     /** Delete only after the dashboard agrees; an empty successful body (204) is expected. */
@@ -330,15 +363,176 @@ class Api(
         endpoint: Endpoint,
         id: String,
     ) {
-        send(
+        sendFencedMutation(endpoint, id) { fence, requestId ->
             Request
                 .Builder()
-                .url(sessionUrl(endpoint, id))
-                .header("Accept", "application/json")
+                .url(
+                    sessionUrl(
+                        endpoint,
+                        id,
+                        mapOf(
+                            "request_id" to requestId,
+                            "expected_revision" to fence.revisionText,
+                            "expected_generation" to fence.generationText,
+                        ),
+                    ),
+                ).header("Accept", "application/json")
                 .delete()
-                .authorize(),
+        }
+    }
+
+    /**
+     * Sends one fenced mutation. A relevant conflict (409 client_upgrade_required) re-reads the
+     * snapshot and retries once with a fresh request id; a second conflict is the caller's cue to
+     * reload. Any other failure propagates immediately and is never retried.
+     */
+    private suspend fun sendFencedMutation(
+        endpoint: Endpoint,
+        id: String,
+        build: (MutationFence, String) -> Request.Builder,
+    ) {
+        var fence = mutationFence(endpoint, id)
+        var conflicts = 0
+        while (true) {
+            val requestId = UUID.randomUUID().toString()
+            if (sendMutation(build(fence, requestId).authorize()) == MutationOutcome.SUCCESS) return
+            conflicts++
+            if (conflicts >= MAX_MUTATION_ATTEMPTS) {
+                throw ApiException(
+                    message = "changed elsewhere — retry",
+                    kind = ApiErrorKind.HTTP,
+                    httpCode = 409,
+                )
+            }
+            fence = mutationFence(endpoint, id)
+        }
+    }
+
+    private suspend fun sendMutation(builder: Request.Builder): MutationOutcome =
+        try {
+            client.newCall(builder.build()).awaitResponse().use { response ->
+                val body = response.readBody()
+                when {
+                    response.isSuccessful -> MutationOutcome.SUCCESS
+                    response.code == 409 && body.contains(CLIENT_UPGRADE_REQUIRED) ->
+                        MutationOutcome.UPGRADE_REQUIRED
+
+                    else -> throw httpError(response.code)
+                }
+            }
+        } catch (exception: IOException) {
+            throw ApiException(
+                message = "Dashboard unreachable — check address",
+                kind = ApiErrorKind.NETWORK,
+                cause = exception,
+            )
+        }
+
+    /**
+     * Owner counters a destructive write must quote. Missing or malformed counters are rejected
+     * rather than silently dropping a fence. Generation is optional only when absent or null.
+     */
+    private suspend fun mutationFence(
+        endpoint: Endpoint,
+        id: String,
+    ): MutationFence {
+        val body = getJson(endpoint, sessionPath(id) + "mutation-snapshot", emptyMap())
+        val wire = decode<SessionMutationSnapshotWire>(body)
+        if (wire.exists != true) {
+            val stale = wire.exists == false
+            throw ApiException(
+                message =
+                    if (stale) {
+                        "Session is no longer on the dashboard"
+                    } else {
+                        "Dashboard returned an incomplete session snapshot"
+                    },
+                kind = if (stale) ApiErrorKind.HTTP else ApiErrorKind.INVALID_RESPONSE,
+                httpCode = if (stale) 404 else null,
+            )
+        }
+        val revision =
+            wire.runtime_revision.mutationCounterOrNull()
+                ?: throw ApiException(
+                    message = "Dashboard did not return the session's current revision",
+                    kind = ApiErrorKind.INVALID_RESPONSE,
+                )
+        val generationElement = wire.runtime_generation?.takeUnless { it == JsonNull }
+        val generation = generationElement.mutationCounterOrNull()
+        if (generationElement != null && generation == null) {
+            throw ApiException(
+                message = "Dashboard returned an unexpected session snapshot",
+                kind = ApiErrorKind.INVALID_RESPONSE,
+            )
+        }
+        return MutationFence(
+            revision = revision,
+            generation = generation,
         )
     }
+
+    /**
+     * Snapshot counters arrive as JSON numbers or numeric strings; both round-trip unchanged and
+     * arbitrary-length integer strings are kept rather than narrowed through Long parsing.
+     */
+    private fun JsonElement?.mutationCounterOrNull(): JsonElement? {
+        val primitive = this as? JsonPrimitive ?: return null
+        if (primitive == JsonNull) return null
+        val text = primitive.content
+        return primitive.takeIf { text.isNotEmpty() && text.all { it in '0'..'9' } }
+    }
+
+    /**
+     * Rows from either the list envelope (`sessions`) or the search envelope (`results`), ordered
+     * and deduplicated by id because message-hit results can repeat one session. A response with
+     * neither collection is malformed, so search callers can fall back to local filtering.
+     */
+    private fun sessionRows(wire: SessionListWire): List<SessionSummary> {
+        val rows =
+            wire.sessions ?: wire.results
+                ?: throw ApiException(
+                    message = "Dashboard returned an unexpected response",
+                    kind = ApiErrorKind.INVALID_RESPONSE,
+                )
+        return rows
+            .mapNotNull { item ->
+                val id =
+                    item.id.takeIf { it.isNotBlank() }
+                        ?: item.session_id?.takeIf { it.isNotBlank() }
+                        ?: return@mapNotNull null
+                SessionSummary(
+                    id = id,
+                    title = item.title ?: item.display_name ?: "(untitled)",
+                    source = item.source,
+                    profile = item.profile,
+                    preview = item.preview ?: item.snippet,
+                    displayName = item.display_name,
+                    model = item.model,
+                    messageCount = item.message_count.asIntOrNull(),
+                    status = item.status,
+                    updatedAtEpochMs =
+                        item.last_active.asEpochMillisOrNull()
+                            ?: item.last_activity_at.asEpochMillisOrNull()
+                            ?: item.session_started.asEpochMillisOrNull()
+                            ?: item.started_at.asEpochMillisOrNull(),
+                    unread = item.unread.asLenientBooleanOrNull(),
+                    pinned = item.pinned.asLenientBooleanOrNull() ?: false,
+                    archived = item.archived.asLenientBooleanOrNull() ?: false,
+                )
+            }.distinctBy { it.id }
+    }
+
+    private fun pageHasMore(
+        total: Int,
+        offset: Int,
+        returned: Int,
+        limit: Int,
+    ): Boolean =
+        if (total > 0) {
+            offset + returned < total
+        } else {
+            returned > 0 && returned >= limit
+        }
 
     private suspend fun getJson(
         endpoint: Endpoint,
@@ -384,8 +578,9 @@ class Api(
     private fun sessionUrl(
         endpoint: Endpoint,
         id: String,
+        query: Map<String, String?> = emptyMap(),
     ): String {
-        val builder = endpoint.buildUrl("api/sessions", emptyMap()).newBuilder()
+        val builder = endpoint.buildUrl("api/sessions", query).newBuilder()
         sessionPath(id).forEach { builder.addPathSegment(it) }
         return builder.build().toString()
     }
@@ -506,8 +701,32 @@ class Api(
         const val DEFAULT_PAGE_SIZE: Int = 50
         const val MAX_PAGE_SIZE: Int = 500
         private const val AROUND_SYNTHETIC_BASE: Long = 1_000_000_000L
+        private const val MAX_MUTATION_ATTEMPTS: Int = 2
+        private const val CLIENT_UPGRADE_REQUIRED: String = "client_upgrade_required"
     }
 }
+
+/** Owner counters a fenced mutation quotes; elements keep the dashboard's number/string encoding. */
+private data class MutationFence(
+    val revision: JsonElement,
+    val generation: JsonElement?,
+) {
+    val revisionText: String get() = (revision as JsonPrimitive).content
+    val generationText: String? get() = (generation as? JsonPrimitive)?.content
+}
+
+private enum class MutationOutcome {
+    SUCCESS,
+    UPGRADE_REQUIRED,
+}
+
+@Serializable
+private data class SessionMutationSnapshotWire(
+    val session_id: String? = null,
+    val exists: Boolean? = null,
+    val runtime_revision: JsonElement? = null,
+    val runtime_generation: JsonElement? = null,
+)
 
 @Serializable
 private data class AudioTranscriptWire(
@@ -521,25 +740,30 @@ private data class LatestDescendantWire(
 
 @Serializable
 private data class SessionListWire(
-    val sessions: List<SessionWire> = emptyList(),
+    val sessions: List<SessionWire>? = null,
+    val results: List<SessionWire>? = null,
     val total: Int? = null,
     val limit: Int? = null,
     val offset: Int? = null,
+    val has_more: Boolean? = null,
 )
 
 @Serializable
 private data class SessionWire(
     val id: String = "",
+    val session_id: String? = null,
     val title: String? = null,
     val display_name: String? = null,
     val source: String? = null,
     val profile: String? = null,
     val preview: String? = null,
+    val snippet: String? = null,
     val model: String? = null,
     val message_count: JsonElement? = null,
     val status: String? = null,
     val last_active: JsonElement? = null,
     val last_activity_at: JsonElement? = null,
+    val session_started: JsonElement? = null,
     val started_at: JsonElement? = null,
     val unread: JsonElement? = null,
     val pinned: JsonElement? = null,

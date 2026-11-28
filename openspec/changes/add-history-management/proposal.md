@@ -8,9 +8,12 @@ long-press sheet, two destructive-safe rows.
 
 ## What Changes
 
-- Sessions gains a search action: SDK text input, live filter over title and preview, `N of M`.
+- Sessions gains SDK search input: server-wide matches for 2+ characters, a local title/preview
+  fallback, and an honest displayed/matching `N of M` header.
 - Long-press a row → Rename / Delete sheet; Delete needs a second confirm naming the title.
 - Server truth: rename and delete are only reflected after the server agrees; failures are named.
+- Rename/delete acquire runtime mutation fences and retry `409 client_upgrade_required` once;
+  repeated refusal reports `changed elsewhere — retry` without an optimistic row change.
 
 ## Capabilities
 

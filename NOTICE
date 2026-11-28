@@ -13,6 +13,9 @@ Latest-descendant response handling and stored/runtime session identity follow H
 SessionOpsResponses and ActiveSessionHolder contracts. Session resume parameters/runtime result
 handling follow its SessionPrompt contract and ChatViewModel resume flow; no reference UI was copied.
 Audio transcription follows its AudioTranscription data_url/mime_type request and transcript response.
+History mutation snapshots, rename/delete fences and server search follow its HermesApiService,
+SessionRenameRequest and SessionSearchModels contracts; integer/string runtime counters retain
+their JSON types.
 
 Light SDK and its dependencies retain their respective licenses.
 BrightHermes patterns are reused with the owner's permission.
