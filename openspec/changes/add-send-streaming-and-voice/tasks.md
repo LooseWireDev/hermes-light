@@ -175,3 +175,15 @@ adb/emulator use. Home, Thread and the SDK editor now show the takeover panel; a
 finish into a reviewable draft, and editor SAVE returns with Send focused. The synthetic Compose/
 Send transcript rows and the editor send-on-release path are removed. Drafts remain per-session
 in the shared controller. See `evidence.md` for the 202-test result and remaining device boundary.
+
+## 15. Queued prompt stuck when the running flag is stale (found on the AVD)
+
+Device trace (0.2.3/107): a send from the new composer rendered the button as QUEUE, cleared the
+composer, and the prompt never appeared in the dashboard transcript — `prompt.submit` went out with
+`queued: true` because `conversation.running` was true for a session that was actually idle. A queued
+prompt on an idle session never starts, so the send is silently lost.
+
+- [ ] 15.1 Running state must come from the gateway, not from a remembered flag: when a thread opens (and on resume), reconcile `running` against the session's live state before the first submit.
+- [ ] 15.2 After submitting with `queued = true`, verify the turn actually starts (event or session poll) within ~5s; if the session is idle and the prompt has not started, resubmit once with `queued = false` and mark the row accordingly.
+- [ ] 15.3 A queued row that cannot start surfaces `could not start — retry` instead of sitting silently.
+- [ ] 15.4 Unit tests: stale-running reconciliation, queued→direct promotion, and no double submit.
