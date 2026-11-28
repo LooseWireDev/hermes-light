@@ -148,6 +148,83 @@ class ApiTest {
         }
 
     @Test
+    fun `rename session patches one encoded id with title through the proxy prefix`() =
+        runBlocking {
+            val requests = Collections.synchronizedList(mutableListOf<String>())
+            TestHttpServer { exchange ->
+                requests.add("${exchange.method} ${exchange.requestURI.rawPath}")
+                assertEquals("Bearer session-token", exchange.requestHeaders.getFirst("Authorization"))
+                val contentType = exchange.requestHeaders.getFirst("Content-Type").orEmpty()
+                assertTrue(contentType.startsWith("application/json"))
+                val payload = hermesJson.parseToJsonElement(exchange.bodyText()).jsonObject
+                assertEquals(setOf("title"), payload.keys)
+                assertEquals("Renamed / title", payload["title"]?.jsonPrimitive?.content)
+                exchange.respondEmpty(204)
+            }.use { server ->
+                Api(newHttpClient(), tokenProvider = { "session-token" }).renameSession(
+                    endpoint = Endpoint.parse("${server.baseUrl}dash/"),
+                    id = "stored/branch %?#",
+                    title = "Renamed / title",
+                )
+                assertEquals(
+                    listOf("PATCH /dash/api/sessions/stored%2Fbranch%20%25%3F%23"),
+                    requests.toList(),
+                )
+            }
+        }
+
+    @Test
+    fun `delete session sends DELETE with an empty body and accepts 204`() =
+        runBlocking {
+            val requests = Collections.synchronizedList(mutableListOf<String>())
+            TestHttpServer { exchange ->
+                requests.add("${exchange.method} ${exchange.requestURI.rawPath}")
+                assertEquals("", exchange.bodyText())
+                assertNull(exchange.requestHeaders.getFirst("Authorization"))
+                exchange.respondEmpty(204)
+            }.use { server ->
+                Api(newHttpClient()).deleteSession(
+                    endpoint = Endpoint.parse("${server.baseUrl}dash/"),
+                    id = "stored/branch %?#",
+                )
+                assertEquals(
+                    listOf("DELETE /dash/api/sessions/stored%2Fbranch%20%25%3F%23"),
+                    requests.toList(),
+                )
+            }
+        }
+
+    @Test
+    fun `session mutations propagate dashboard failures and never report success early`() =
+        runBlocking {
+            var status = 500
+            val requests = AtomicInteger(0)
+            TestHttpServer { exchange ->
+                requests.incrementAndGet()
+                exchange.respondEmpty(status)
+            }.use { server ->
+                val endpoint = Endpoint.parse(server.baseUrl)
+                val api = Api(newHttpClient())
+
+                val renameFailure =
+                    assertFailsWith<ApiException> {
+                        api.renameSession(endpoint, "s1", "New title")
+                    }
+                assertEquals(ApiErrorKind.HTTP, renameFailure.kind)
+                assertEquals(500, renameFailure.httpCode)
+
+                status = 403
+                val deleteFailure =
+                    assertFailsWith<ApiException> {
+                        api.deleteSession(endpoint, "s1")
+                    }
+                assertEquals(ApiErrorKind.UNAUTHORIZED, deleteFailure.kind)
+                assertEquals(403, deleteFailure.httpCode)
+                assertEquals(2, requests.get())
+            }
+        }
+
+    @Test
     fun `latest descendant requires a nonblank current id`() =
         runBlocking {
             for (body in listOf("{}", """{"session_id":""}""", """{"session_id":" "}""")) {

@@ -34,6 +34,10 @@ Long-thread paging, search over sessions, notification of replies while backgrou
 policy allows), setup hardening (password + token modes), install/release path (own keystore,
 sideload via the owner's tools).
 
+`add-history-management` implements loaded-history search, in-place rename and confirmed deletion
+for 0.2.4 / code 108. Actions stay inside Sessions; no seventh navigation destination. LP3 layout,
+wheel and live-dashboard acceptance remain pending (no adb/emulator in this implementation task).
+
 ## Standing constraints
 
 - Six screens maximum: Home (conditional strip + thread), Menu (status + destinations + recents),

@@ -308,29 +308,62 @@ class Api(
         )
     }
 
+    /** Rename only after the dashboard agrees; callers must not show the title before this returns. */
+    suspend fun renameSession(
+        endpoint: Endpoint,
+        id: String,
+        title: String,
+    ) {
+        val payload = buildJsonObject { put("title", title) }.toString()
+        send(
+            Request
+                .Builder()
+                .url(sessionUrl(endpoint, id))
+                .header("Accept", "application/json")
+                .patch(payload.toRequestBody("application/json".toMediaType()))
+                .authorize(),
+        )
+    }
+
+    /** Delete only after the dashboard agrees; an empty successful body (204) is expected. */
+    suspend fun deleteSession(
+        endpoint: Endpoint,
+        id: String,
+    ) {
+        send(
+            Request
+                .Builder()
+                .url(sessionUrl(endpoint, id))
+                .header("Accept", "application/json")
+                .delete()
+                .authorize(),
+        )
+    }
+
     private suspend fun getJson(
         endpoint: Endpoint,
         path: List<String>,
         query: Map<String, String?>,
         basePath: String = "api/sessions",
     ): String {
-        val builderUrl = endpoint.buildUrl(basePath, query).newBuilder()
-        path.forEach { builderUrl.addPathSegment(it) }
-        val url = builderUrl.build().toString()
-        val builder =
+        val urlBuilder = endpoint.buildUrl(basePath, query).newBuilder()
+        path.forEach { urlBuilder.addPathSegment(it) }
+        return send(
             Request
                 .Builder()
-                .url(url)
+                .url(urlBuilder.build().toString())
                 .header("Accept", "application/json")
                 .get()
-        tokenProvider()?.takeIf { it.isNotBlank() }?.let { token ->
-            builder.header("Authorization", "Bearer $token")
-        }
+                .authorize(),
+        )
+    }
+
+    private suspend fun send(builder: Request.Builder): String =
         try {
             client.newCall(builder.build()).awaitResponse().use { response ->
                 val body = response.readBody()
                 if (!response.isSuccessful) throw httpError(response.code)
-                return body
+                body
             }
         } catch (exception: IOException) {
             throw ApiException(
@@ -339,6 +372,22 @@ class Api(
                 cause = exception,
             )
         }
+
+    private fun Request.Builder.authorize(): Request.Builder =
+        apply {
+            tokenProvider()?.takeIf { it.isNotBlank() }?.let { token ->
+                header("Authorization", "Bearer $token")
+            }
+        }
+
+    /** One encoded path segment, so ids containing `/` or reserved characters stay one id. */
+    private fun sessionUrl(
+        endpoint: Endpoint,
+        id: String,
+    ): String {
+        val builder = endpoint.buildUrl("api/sessions", emptyMap()).newBuilder()
+        sessionPath(id).forEach { builder.addPathSegment(it) }
+        return builder.build().toString()
     }
 
     private inline fun <reified T> decode(body: String): T =

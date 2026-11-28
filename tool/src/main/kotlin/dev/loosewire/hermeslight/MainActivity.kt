@@ -199,6 +199,24 @@ private fun SimpleLightScreen<Unit>.Surface(
             open(controller, route, Route.Sessions, voice)
         }
     }
+
+    fun requestVoice(onTranscript: ((String) -> Unit)? = null) {
+        val gesture = ++voice.gesture
+        scope.launch {
+            val granted = hasRecordAudioPermission()
+            if (gesture != voice.gesture) return@launch
+            if (!granted) {
+                controller.voicePermissionDenied()
+                if (!voice.requested && permissionLauncher != null) {
+                    voice.requested = true
+                    permissionLauncher.launch()
+                }
+            } else {
+                controller.startVoice(onTranscript)
+            }
+        }
+    }
+
     val threadActions =
         ThreadActions(
             onLoadOlder = controller::loadOlder,
@@ -229,22 +247,7 @@ private fun SimpleLightScreen<Unit>.Surface(
                     }
                 }
             },
-            onHoldStart = {
-                val gesture = ++voice.gesture
-                scope.launch {
-                    val granted = hasRecordAudioPermission()
-                    if (gesture != voice.gesture) return@launch
-                    if (!granted) {
-                        controller.voicePermissionDenied()
-                        if (!voice.requested && permissionLauncher != null) {
-                            voice.requested = true
-                            permissionLauncher.launch()
-                        }
-                    } else {
-                        controller.startVoice()
-                    }
-                }
-            },
+            onHoldStart = { requestVoice() },
             onHoldEnd = {
                 voice.gesture++
                 controller.releaseVoice()
@@ -347,10 +350,14 @@ private fun SimpleLightScreen<Unit>.Surface(
                             onBack = back,
                         ),
                     )
-                route == Route.Sessions ->
+                route == Route.Sessions -> {
+                    val rows =
+                        remember(state.sessions, state.sessionsQuery, state.liveSessions) {
+                            state.sessionRows(System.currentTimeMillis(), filterSessions(state.sessions, state.sessionsQuery))
+                        }
                     SessionsScreen(
                         SessionsUi(
-                            sessions = state.sessionRows(System.currentTimeMillis()),
+                            sessions = rows,
                             profileId = state.selectedBot,
                             selectedSessionId = state.selectedSession,
                             position = position.list,
@@ -358,6 +365,15 @@ private fun SimpleLightScreen<Unit>.Surface(
                             loading = state.sessionsLoading,
                             loadError = state.operationError,
                             creating = state.creatingSession,
+                            query = state.sessionsQuery,
+                            totalCount = state.sessions.size,
+                            action = state.historyAction,
+                            actionBusy = state.historyBusy,
+                            actionError = state.historyError,
+                            voicePhase = thread.voicePhase,
+                            voiceLevel = voiceLevel,
+                            voicePartial = voicePartial,
+                            voiceFeedback = state.voiceFeedback,
                             status = state.statusUi(),
                         ),
                         SessionsActions(
@@ -373,10 +389,21 @@ private fun SimpleLightScreen<Unit>.Surface(
                             onOpenBots = { open(controller, route, Route.Bots, voice) },
                             onLoadMore = { controller.loadSessions(reset = state.sessions.isEmpty()) },
                             onPositionChanged = { position.list = it },
+                            onQueryChange = controller::searchSessions,
+                            onShowActions = controller::showSessionActions,
+                            onBeginRename = controller::beginSessionRename,
+                            onBeginDelete = controller::beginSessionDelete,
+                            onDismissActions = controller::dismissSessionActions,
+                            onRename = controller::renameSession,
+                            onConfirmDelete = controller::confirmSessionDelete,
+                            onHoldStart = { requestVoice(it) },
+                            onHoldEnd = threadActions.onHoldEnd,
+                            onHoldCancel = threadActions.onHoldCancel,
                             onBack = back,
                             onLongBack = setup,
                         ),
                     )
+                }
                 route == Route.Thread -> ThreadScreen(thread, threadActions)
                 route == Route.Bots ->
                     BotsScreen(

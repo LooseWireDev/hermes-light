@@ -100,6 +100,13 @@ uses its admission receipt. Stop waits for gateway completion; a lost RPC reply 
 not permission to resend. Approval Yes/No/Always and clarify rows require explicit activation;
 Always appears only when permitted. Nothing answers automatically or on navigation.
 
+History has a top-bar SEARCH action (wheel up past New session). The SDK editor filters loaded
+titles and previews live, case-insensitively, with `N of M` in the header. CLEAR restores the list;
+Back clears an active query before leaving. Hold the wheel on a session, or long-press it, for
+Rename / Delete. Rename uses the SDK editor; Delete needs the separate confirmation naming the
+session. Rows change only after server success; failures keep the original row. Search and rename
+editors support hold-wheel dictation without sending a prompt.
+
 Chrome uses SDK widgets only. The annotated transcript-span renderer uses foundation `BasicText`
 because the active SDK's `LightText` accepts only `String`; its typography and colors still come
 from `LightThemeTokens`. The in-repo `WheelScroll` driver implements the BrightHermes wheel contract

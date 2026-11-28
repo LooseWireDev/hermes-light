@@ -84,6 +84,7 @@ internal class TestHeaders {
 }
 
 internal class TestRequest private constructor(
+    val method: String,
     val requestURI: URI,
     val requestHeaders: TestHeaders,
     private val body: String,
@@ -141,7 +142,7 @@ internal class TestRequest private constructor(
             val size = headers.getFirst("Content-Length")?.toInt() ?: 0
             val bytes = input.readNBytes(size)
             require(bytes.size == size) { "Truncated request body" }
-            return TestRequest(URI(first[1]), headers, bytes.decodeToString(), socket)
+            return TestRequest(first[0], URI(first[1]), headers, bytes.decodeToString(), socket)
         }
 
         private fun readLine(input: InputStream): String {

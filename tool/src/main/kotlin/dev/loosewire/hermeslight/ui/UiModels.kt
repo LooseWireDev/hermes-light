@@ -67,6 +67,18 @@ data class SessionRowUi(
     val detail: String? = null,
 )
 
+enum class SessionActionMode {
+    Actions,
+    Rename,
+    ConfirmDelete,
+}
+
+data class SessionActionUi(
+    val id: String,
+    val title: String,
+    val mode: SessionActionMode = SessionActionMode.Actions,
+)
+
 data class SessionsUi(
     val sessions: List<SessionRowUi> = emptyList(),
     val profileId: String? = null,
@@ -77,6 +89,15 @@ data class SessionsUi(
     val loading: Boolean = false,
     val loadError: String? = null,
     val creating: Boolean = false,
+    val query: String = "",
+    val totalCount: Int = sessions.size,
+    val action: SessionActionUi? = null,
+    val actionBusy: Boolean = false,
+    val actionError: String? = null,
+    val voicePhase: VoicePhase = VoicePhase.Idle,
+    val voiceLevel: Float = 0f,
+    val voicePartial: String = "",
+    val voiceFeedback: String? = null,
     val status: StatusLineModel = StatusLineModel(""),
 )
 
@@ -86,6 +107,16 @@ data class SessionsActions(
     val onLoadMore: () -> Unit = {},
     val onNewSession: () -> Unit = {},
     val onPositionChanged: (ListPosition) -> Unit = {},
+    val onQueryChange: (String) -> Unit = {},
+    val onShowActions: (String) -> Unit = {},
+    val onBeginRename: () -> Unit = {},
+    val onBeginDelete: () -> Unit = {},
+    val onDismissActions: () -> Unit = {},
+    val onRename: (String) -> Unit = {},
+    val onConfirmDelete: () -> Unit = {},
+    val onHoldStart: ((String) -> Unit) -> Unit = {},
+    val onHoldEnd: () -> Unit = {},
+    val onHoldCancel: () -> Unit = {},
     val onBack: () -> Unit = {},
     val onLongBack: () -> Unit = {},
 )

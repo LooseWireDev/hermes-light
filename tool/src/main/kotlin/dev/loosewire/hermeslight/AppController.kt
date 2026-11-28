@@ -23,11 +23,13 @@ import dev.loosewire.hermeslight.net.TicketResult
 import dev.loosewire.hermeslight.net.WsAuthParam
 import dev.loosewire.hermeslight.net.defaultHttpClient
 import dev.loosewire.hermeslight.ui.DEFAULT_ENDPOINT
+import dev.loosewire.hermeslight.ui.SessionActionUi
 import dev.loosewire.hermeslight.voice.Listener
 import dev.loosewire.hermeslight.voice.WavAudio
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.cancel
@@ -70,6 +72,10 @@ internal data class AppState(
     val sessions: List<SessionSummary> = emptyList(),
     val sessionsLoading: Boolean = false,
     val sessionsHaveMore: Boolean = false,
+    val sessionsQuery: String = "",
+    val historyAction: SessionActionUi? = null,
+    val historyBusy: Boolean = false,
+    val historyError: String? = null,
     val bots: List<BotSource> = emptyList(),
     val menuSessions: List<SessionSummary> = emptyList(),
     val menuSessionCount: Int? = null,
@@ -117,6 +123,9 @@ internal class AppController(
     private var positionSaveJob: Job? = null
     private var sessionsOffset = 0
     private var connectionEpoch = 0
+    private var historyJob: Job? = null
+    private var historyEpoch = 0
+    private var sessionListRevision = 0L
     private val client = defaultHttpClient()
     private var nextPromptId = 0L
     private val eventRevisions = mutableMapOf<String, Long>()
@@ -125,6 +134,22 @@ internal class AppController(
     private val refreshJobs = mutableMapOf<String, Job>()
     private var attentionJob: Job? = null
     private val api = Api(client, tokenProvider = { profile?.takeIf { it.authMode == AuthMode.TOKEN }?.token })
+    private val history =
+        SessionManagement(
+            state = { mutable.value },
+            update = { transform -> mutable.update(transform) },
+            rename = { id, title ->
+                val saved = profile ?: error("Not connected to the dashboard")
+                api.renameSession(Endpoint.parse(saved.endpoint), id, title)
+            },
+            delete = { id ->
+                val saved = profile ?: error("Not connected to the dashboard")
+                api.deleteSession(Endpoint.parse(saved.endpoint), id)
+            },
+            onChanged = { sessionListRevision += 1 },
+            onDeleted = ::sessionDeleted,
+            current = { historyEpoch == connectionEpoch },
+        )
     private var sessionRuntime: SessionRuntime? = null
     private val auth = Auth(client)
     private val saveMutex = Mutex()
@@ -216,13 +241,25 @@ internal class AppController(
         creationJob?.cancel()
         botsJob?.cancel()
         menuJob?.cancel()
+        historyJob?.cancel()
+        history.invalidate()
         refreshJobs.values.forEach { it.cancel() }
         refreshJobs.clear()
         queuedChecks.values.forEach { it.cancel() }
         queuedChecks.clear()
         attentionJob?.cancel()
         gateway.onForeground(false)
-        mutable.update { it.copy(connecting = false, sessionsLoading = false, threadLoading = false, botsLoading = false) }
+        mutable.update {
+            it.copy(
+                connecting = false,
+                sessionsLoading = false,
+                threadLoading = false,
+                botsLoading = false,
+                historyAction = null,
+                historyBusy = false,
+                historyError = null,
+            )
+        }
     }
 
     fun close() {
@@ -247,7 +284,19 @@ internal class AppController(
         creationJob?.cancel()
         botsJob?.cancel()
         menuJob?.cancel()
-        mutable.update { it.copy(sessionsLoading = false, threadLoading = false, botsLoading = false) }
+        historyJob?.cancel()
+        history.invalidate()
+        mutable.update {
+            it.copy(
+                sessionsLoading = false,
+                threadLoading = false,
+                botsLoading = false,
+                sessionsQuery = "",
+                historyAction = null,
+                historyBusy = false,
+                historyError = null,
+            )
+        }
         connectionJob =
             scope.launch {
                 val candidate =
@@ -273,6 +322,8 @@ internal class AppController(
         persist: Boolean = false,
     ) {
         val epoch = ++connectionEpoch
+        historyJob?.cancel()
+        history.invalidate()
         queuedChecks.values.forEach { it.cancel() }
         queuedChecks.clear()
         gateway.disconnect()
@@ -369,6 +420,10 @@ internal class AppController(
                         endpoint = authenticated.endpoint,
                         selectedBot = authenticated.botProfile,
                         selectedSession = authenticated.selectedSessionId,
+                        sessionsQuery = "",
+                        historyAction = null,
+                        historyBusy = false,
+                        historyError = null,
                         menuSessions = if (persist) emptyList() else it.menuSessions,
                         menuSessionCount = if (persist) null else it.menuSessionCount,
                         menuCronCount = if (persist) null else it.menuCronCount,
@@ -423,6 +478,7 @@ internal class AppController(
     private fun loadMenu() {
         val saved = profile ?: return
         val epoch = connectionEpoch
+        val revision = sessionListRevision
         menuJob?.cancel()
         menuJob =
             scope.launch {
@@ -430,7 +486,7 @@ internal class AppController(
                 val endpoint = Endpoint.parse(saved.endpoint)
                 try {
                     val page = api.sessions(endpoint, limit = 3)
-                    if (epoch != connectionEpoch) return@launch
+                    if (epoch != connectionEpoch || revision != sessionListRevision) return@launch
                     mutable.update {
                         it.copy(
                             menuSessions = page.sessions,
@@ -440,13 +496,19 @@ internal class AppController(
                 } catch (error: CancellationException) {
                     throw error
                 } catch (error: Exception) {
-                    mutable.update {
-                        it.copy(menuSessions = emptyList(), menuSessionCount = null, menuError = error.message ?: "Sessions unavailable")
+                    if (epoch == connectionEpoch && revision == sessionListRevision) {
+                        mutable.update {
+                            it.copy(
+                                menuSessions = emptyList(),
+                                menuSessionCount = null,
+                                menuError = error.message ?: "Sessions unavailable",
+                            )
+                        }
                     }
                 }
                 try {
                     val jobs = api.cronJobs(endpoint, selectedProfile(saved))
-                    if (epoch != connectionEpoch) return@launch
+                    if (epoch != connectionEpoch || revision != sessionListRevision) return@launch
                     mutable.update {
                         it.copy(
                             menuCronCount = jobs.size,
@@ -463,7 +525,9 @@ internal class AppController(
                 } catch (error: CancellationException) {
                     throw error
                 } catch (error: Exception) {
-                    mutable.update { it.copy(menuCronCount = null, menuCronSummary = error.message ?: "Jobs unavailable") }
+                    if (epoch == connectionEpoch && revision == sessionListRevision) {
+                        mutable.update { it.copy(menuCronCount = null, menuCronSummary = error.message ?: "Jobs unavailable") }
+                    }
                 }
             }
     }
@@ -473,6 +537,8 @@ internal class AppController(
         if (mutable.value.sessionsLoading && !reset) return
         sessionsJob?.cancel()
         val bot = mutable.value.selectedBot
+        val epoch = connectionEpoch
+        val revision = sessionListRevision
         val source = bot?.takeIf { it.startsWith("source:") }?.removePrefix("source:")
         val botProfile = bot?.takeIf { it.startsWith("profile:") }?.removePrefix("profile:")
         if (reset) sessionsOffset = 0
@@ -494,6 +560,7 @@ internal class AppController(
                             source = source,
                             profile = botProfile,
                         )
+                    if (epoch != connectionEpoch || revision != sessionListRevision || mutable.value.selectedBot != bot) return@launch
                     sessionsOffset = offset + page.sessions.size
                     mutable.update {
                         it.copy(
@@ -507,9 +574,11 @@ internal class AppController(
                 } catch (error: CancellationException) {
                     throw error
                 } catch (error: Exception) {
-                    operationFailure(error)
+                    if (epoch == connectionEpoch && revision == sessionListRevision) operationFailure(error)
                 } finally {
-                    if (currentCoroutineContext().isActive) mutable.update { it.copy(sessionsLoading = false) }
+                    if (epoch == connectionEpoch && currentCoroutineContext().isActive) {
+                        mutable.update { it.copy(sessionsLoading = false) }
+                    }
                 }
             }
     }
@@ -724,9 +793,21 @@ internal class AppController(
     fun selectBot(source: String?) {
         cancelVoice()
         threadJob?.cancel()
+        historyJob?.cancel()
+        history.invalidate()
         persist { it.copy(botProfile = source, selectedSessionId = null) }
         mutable.update {
-            it.copy(selectedBot = source, selectedSession = null, sessions = emptyList(), messages = emptyList(), positionRow = null)
+            it.copy(
+                selectedBot = source,
+                selectedSession = null,
+                sessions = emptyList(),
+                messages = emptyList(),
+                positionRow = null,
+                sessionsQuery = "",
+                historyAction = null,
+                historyBusy = false,
+                historyError = null,
+            )
         }
         loadSessions(reset = true)
     }
@@ -785,15 +866,75 @@ internal class AppController(
         mutable.update { it.copy(sessionsRequired = false) }
     }
 
+    fun searchSessions(query: String) {
+        history.search(query)
+    }
+
+    fun showSessionActions(id: String) {
+        history.showActions(id)
+    }
+
+    fun beginSessionRename() {
+        history.beginRename()
+    }
+
+    fun beginSessionDelete() {
+        history.beginDelete()
+    }
+
+    fun dismissSessionActions() {
+        history.dismiss()
+    }
+
+    fun renameSession(title: String) {
+        launchHistory { history.renameSession(title) }
+    }
+
+    fun confirmSessionDelete() {
+        launchHistory { history.confirmSessionDelete() }
+    }
+
+    private fun launchHistory(block: suspend () -> Unit) {
+        if (historyJob?.isActive == true) return
+        historyEpoch = connectionEpoch
+        historyJob =
+            scope.launch(start = CoroutineStart.UNDISPATCHED) {
+                block()
+            }
+    }
+
+    private fun sessionDeleted(
+        id: String,
+        selected: Boolean,
+        loaded: Boolean,
+    ) {
+        if (loaded && sessionsOffset > 0) sessionsOffset -= 1
+        refreshJobs.remove(id)?.cancel()
+        queuedChecks.remove(id)?.cancel()
+        eventRevisions.remove(id)
+        activityRevisions.remove(id)
+        if (selected) {
+            cancelVoice()
+            threadJob?.cancel()
+        }
+        persist { saved ->
+            saved.copy(
+                selectedSessionId = saved.selectedSessionId?.takeUnless { it == id },
+                readPositions = saved.readPositions - id,
+                readOffsets = saved.readOffsets - id,
+            )
+        }
+    }
+
     fun voicePermissionDenied() {
         mutable.update { it.copy(voiceFeedback = "Microphone permission not granted — enable in LightOS Settings") }
     }
 
-    fun startVoice() {
+    fun startVoice(onTranscript: ((String) -> Unit)? = null) {
         cancelVoice()
         val saved = profile
         val session = mutable.value.selectedSession
-        if (saved == null || session == null) {
+        if (saved == null || (session == null && onTranscript == null)) {
             mutable.update { it.copy(voiceFeedback = "transcription needs the dashboard") }
             return
         }
@@ -813,12 +954,19 @@ internal class AppController(
                     mutable.update { it.copy(voiceState = state, voiceFeedback = line) }
                 },
                 onResult = { transcript ->
-                    val previous =
-                        mutable.value.conversations[session]
-                            ?.composer
-                            .orEmpty()
-                    val text = if (previous.isBlank()) transcript else "${previous.trimEnd()} $transcript"
-                    editDraft(session, text)
+                    val callback = onTranscript
+                    if (callback != null) {
+                        callback(transcript)
+                    } else {
+                        session?.let { id ->
+                            val previous =
+                                mutable.value.conversations[id]
+                                    ?.composer
+                                    .orEmpty()
+                            val text = if (previous.isBlank()) transcript else "${previous.trimEnd()} $transcript"
+                            editDraft(id, text)
+                        }
+                    }
                 },
             ).also { listener ->
                 voiceTelemetry =
