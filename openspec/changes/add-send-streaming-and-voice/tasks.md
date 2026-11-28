@@ -157,3 +157,14 @@ record implementation, not LP3 visual/hardware acceptance: this task explicitly 
 emulator use. No live microphone/dashboard transcription is claimed. See `design.md` and
 `evidence.md`; original timestamped stitching remains, with conservative text-only anchors
 for dashboard responses. Earlier missing-engine notes above describe the pre-M1.4 builds.
+
+## 14. Voice panel + real composer (owner feedback on alpha6)
+
+Owner: dictation works on the phone; wants a visible listening state (BrightHermes' full-area panel
+with waveform, then a compose step) and a proper Light SDK text field instead of `· Compose`.
+
+- [ ] 14.1 Listener exposes `level: StateFlow<Float>` (RMS of the live chunk, 0..1) and `partial: StateFlow<String>` (windows stitched so far).
+- [ ] 14.2 Listening panel: full content-area takeover while recording — 13-bar waveform (90 ms steps, oldest left), live partial text, hint `let go to send · turn the wheel to cancel`, thread hidden behind it; `transcribing…` state on release, then the final text lands in the composer.
+- [ ] 14.3 Composer: `LightTextField` (label `Message`, placeholder naming the wheel gesture) opening `LightTextInputEditor`, a send action beside it with focus state, multi-line text, and a draft that survives navigation.
+- [ ] 14.4 Status: never print `Model unavailable`; show the model when resolved, omit the fragment otherwise.
+- [ ] 14.5 Tests for the panel's state mapping (idle → listening → transcribing → composer) and the draft retention. Version 0.2.3 / code 107.
