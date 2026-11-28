@@ -433,6 +433,36 @@ class Gateway(
     }
 
     /**
+     * Create a fresh session as the Desktop surface and return the session id the dashboard
+     * minted.
+     *
+     * Only an explicit user action reaches this call; nothing here retries or falls back to
+     * another id. [title] and [profile] are sent only when nonblank. A reply without a nonblank
+     * string `session_id` is a failure.
+     */
+    suspend fun createSession(
+        title: String? = null,
+        profile: String? = null,
+    ): String {
+        val params =
+            buildJsonObject {
+                put("source", DESKTOP_SESSION_SOURCE)
+                title?.takeIf { it.isNotBlank() }?.let { put("title", it) }
+                profile?.takeIf { it.isNotBlank() }?.let { put("profile", it) }
+            }
+        val result = request("session.create", params)
+        val sessionId = (result as? JsonObject)?.get("session_id").asStringOrNull()
+        if (sessionId.isNullOrBlank()) {
+            throw rpcFailure(
+                method = "session.create",
+                message = "Dashboard did not return a session_id from session.create",
+                kind = RpcFailureKind.REJECTED,
+            )
+        }
+        return sessionId
+    }
+
+    /**
      * Build one command failure and log it. Every [request] failure path goes through here, so a
      * debug log names the method and outcome without ever carrying params or prompt text.
      */

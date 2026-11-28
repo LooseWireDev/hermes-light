@@ -64,6 +64,62 @@ class ConversationTest {
         val rejected = sent.submitResult("p1", result)
         assertEquals("first", rejected.composer)
         assertEquals("denied", rejected.prompts.single().error)
+        assertNull(rejected.prompts.single().rejectionCode)
+    }
+
+    @Test
+    fun `session conflict restores the exact multiline text without losing the composer`() {
+        val text = "  first line\n\tsecond  line\n\nlast line "
+        val draft = "  current draft\nwith whitespace  "
+        val sent = Conversation().submit("p1", text).copy(composer = draft)
+
+        val conflicted =
+            sent.submitResult(
+                "p1",
+                result = null,
+                error = "Dashboard rejected prompt.submit (code 4090): open elsewhere",
+                rejectionCode = SESSION_CONFLICT_CODE,
+            )
+
+        assertEquals("$text\n$draft", conflicted.composer)
+        val prompt = conflicted.prompts.single()
+        assertEquals(text, prompt.text)
+        assertEquals(PromptStatus.FAILED, prompt.status)
+        assertEquals(SESSION_CONFLICT_ERROR, prompt.error)
+        assertEquals(SESSION_CONFLICT_CODE, prompt.rejectionCode)
+        assertEquals(SESSION_CONFLICT_ERROR, conflicted.error)
+    }
+
+    @Test
+    fun `conflict code from a rejection body is stored without touching accepted outcomes`() {
+        val sent = Conversation().submit("p1", "first")
+        val conflict =
+            sent.submitResult(
+                "p1",
+                buildJsonObject {
+                    put("status", "rejected")
+                    put("code", SESSION_CONFLICT_CODE)
+                    put("message", "open elsewhere")
+                },
+            )
+        assertEquals(SESSION_CONFLICT_ERROR, conflict.prompts.single().error)
+        assertEquals(SESSION_CONFLICT_CODE, conflict.prompts.single().rejectionCode)
+
+        val accepted =
+            Conversation()
+                .submit("p2", "second")
+                .submitResult(
+                    "p2",
+                    buildJsonObject {
+                        put("status", "accepted")
+                        put("code", SESSION_CONFLICT_CODE)
+                    },
+                    rejectionCode = SESSION_CONFLICT_CODE,
+                )
+        assertEquals(PromptStatus.ACCEPTED, accepted.prompts.single().status)
+        assertNull(accepted.prompts.single().error)
+        assertNull(accepted.prompts.single().rejectionCode)
+        assertEquals("", accepted.composer)
     }
 
     @Test

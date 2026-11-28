@@ -19,8 +19,9 @@ release inserts a draft; M1.5 extends that review-before-send rule to the SDK ed
 full-area listening/transcribing panel with live levels and stitched text, plus an SDK Message field
 and adjacent Send action. M1.6 reconciles gateway activity before sending and checks idle queued
 prompts for one cancellation-safe direct promotion, with an explicit retryable start failure instead
-of a silent queue. On-device recognition is future work (arm64-only sherpa-onnx and approximately
-120 MB Parakeet model).
+of a silent queue. M1.7 creates desktop-surface chats on the phone and offers explicit
+create-and-resubmit recovery for another-window (`4090`) prompt rejection without losing the draft.
+On-device recognition is future work (arm64-only sherpa-onnx and approximately 120 MB Parakeet model).
 
 ## M2 — Deck that earns its keep
 

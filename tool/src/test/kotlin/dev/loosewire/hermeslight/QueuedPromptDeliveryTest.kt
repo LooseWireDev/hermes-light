@@ -293,6 +293,7 @@ class QueuedPromptDeliveryTest {
         thrown.run()
         assertEquals(PromptStatus.FAILED, thrown.prompt()!!.status)
         assertEquals("could not start — retry", thrown.prompt()!!.error)
+        assertNull(thrown.prompt()!!.rejectionCode)
 
         val body = Fixture(queuedConversation())
         body.polls += false
@@ -305,8 +306,53 @@ class QueuedPromptDeliveryTest {
         body.run()
         assertEquals(PromptStatus.FAILED, body.prompt()!!.status)
         assertEquals("could not start — retry", body.prompt()!!.error)
+        assertNull(body.prompt()!!.rejectionCode)
         assertEquals(listOf("hello"), body.submitCalls)
         assertTrue(body.conversation.liveRows().any { it.action == "retry:p1" })
+    }
+
+    @Test
+    fun `promoted direct session conflict keeps the exact text and offers a new chat`() {
+        val text = "  first line\n\tsecond\n\nkeep this "
+        val base =
+            Conversation(running = true)
+                .submit("p1", text, afterRowId = 0)
+                .submitResult("p1", queuedResult("adm-1"))
+
+        val thrown = Fixture(base)
+        thrown.polls += false
+        thrown.onSubmit = { _, _ ->
+            throw GatewayRpcException("prompt.submit rejected", RpcFailureKind.REJECTED, SESSION_CONFLICT_CODE)
+        }
+        thrown.run()
+
+        assertEquals(listOf(text), thrown.submitCalls)
+        val prompt = thrown.prompt()!!
+        assertEquals(PromptStatus.FAILED, prompt.status)
+        assertEquals(text, prompt.text)
+        assertEquals(SESSION_CONFLICT_ERROR, prompt.error)
+        assertEquals(SESSION_CONFLICT_CODE, prompt.rejectionCode)
+        val rows = thrown.conversation.liveRows()
+        assertTrue(rows.any { it.body == "$SESSION_CONFLICT_ERROR: $text" })
+        assertTrue(rows.any { it.action == "new-chat:p1" })
+        assertTrue(rows.none { it.action == "retry:p1" })
+
+        val body = Fixture(base)
+        body.polls += false
+        body.onSubmit = { _, _ ->
+            buildJsonObject {
+                put("status", "rejected")
+                put("code", SESSION_CONFLICT_CODE)
+                put("message", "open elsewhere")
+            }
+        }
+        body.run()
+
+        assertEquals(SESSION_CONFLICT_ERROR, body.prompt()!!.error)
+        assertEquals(SESSION_CONFLICT_CODE, body.prompt()!!.rejectionCode)
+        assertEquals(text, body.prompt()!!.text)
+        assertTrue(body.conversation.liveRows().any { it.action == "new-chat:p1" })
+        assertTrue(body.conversation.liveRows().none { it.action == "retry:p1" })
     }
 
     @Test

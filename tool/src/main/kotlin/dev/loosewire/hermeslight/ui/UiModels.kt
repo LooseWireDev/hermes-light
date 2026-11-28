@@ -76,6 +76,7 @@ data class SessionsUi(
     val hasMore: Boolean = true,
     val loading: Boolean = false,
     val loadError: String? = null,
+    val creating: Boolean = false,
     val status: StatusLineModel = StatusLineModel(""),
 )
 
@@ -176,6 +177,8 @@ data class ThreadUi(
     val voiceLevel: Float = 0f,
     /** Words decoded so far for the live take, empty until the first window returns. */
     val voicePartial: String = "",
+    /** A newly created thread starts on Message, even when a recovered prompt is already visible. */
+    val focusComposer: Boolean = false,
     /** Bumped by the application when the text editor closes; screens focus Send. */
     val composerFocusRevision: Int = 0,
 )

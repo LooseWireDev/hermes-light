@@ -303,6 +303,73 @@ class SessionRuntimeTest {
             assertEquals(1, resumes)
             assertEquals("runtime/current", sent.single()["session_id"]?.jsonPrimitive?.content)
         }
+
+    @Test
+    fun `registerCreated seeds both identities so open and submit never resolve or resume`() =
+        runBlocking {
+            var resolutions = 0
+            var resumes = 0
+            val sent = mutableListOf<JsonObject>()
+            val receipt = buildJsonObject { put("status", "accepted") }
+            val runtime =
+                SessionRuntime(
+                    resolve = {
+                        resolutions++
+                        "stored/tip"
+                    },
+                    resumeSession = {
+                        resumes++
+                        "runtime/elsewhere"
+                    },
+                    request = {
+                        sent.add(it)
+                        receipt
+                    },
+                )
+            runtime.registerCreated("created/1")
+            assertEquals("created/1", runtime.runtimeId("created/1"))
+            assertEquals("created/1", runtime.storedId("created/1"))
+            assertEquals("created/1", runtime.resume("created/1"))
+            assertEquals(receipt, runtime.submit("created/1", "hello", queued = false))
+            assertEquals(0, resolutions)
+            assertEquals(0, resumes)
+            assertEquals(listOf("created/1"), sent.map { it["session_id"]?.jsonPrimitive?.content })
+            assertEquals("hello", sent.single()["text"]?.jsonPrimitive?.content)
+            assertFalse("queued" in sent.single())
+        }
+
+    @Test
+    fun `a registered created id is still invalidated and resumed once after 4001`() =
+        runBlocking {
+            val resolved = mutableListOf<String>()
+            val resumed = mutableListOf<String>()
+            val sent = mutableListOf<JsonObject>()
+            val receipt = buildJsonObject { put("status", "accepted") }
+            val runtime =
+                SessionRuntime(
+                    resolve = {
+                        resolved.add(it)
+                        "stored/tip"
+                    },
+                    resumeSession = {
+                        resumed.add(it)
+                        "runtime/new"
+                    },
+                    request = {
+                        sent.add(it)
+                        if (sent.size == 1) throw notFound()
+                        receipt
+                    },
+                )
+            runtime.registerCreated("created/1")
+            assertEquals(receipt, runtime.submit("created/1", "hello", queued = false))
+            assertEquals(listOf("created/1"), resolved)
+            assertEquals(listOf("stored/tip"), resumed)
+            assertEquals(listOf("created/1", "runtime/new"), sent.map { it["session_id"]?.jsonPrimitive?.content })
+            assertEquals("runtime/new", runtime.runtimeId("created/1"))
+            assertEquals("created/1", runtime.storedId("runtime/new"))
+            assertEquals("created/1", runtime.storedId("created/1"))
+        }
 }
 
 private fun notFound() = GatewayRpcException("prompt.submit rejected (code 4001): session not found", RpcFailureKind.REJECTED, 4001)

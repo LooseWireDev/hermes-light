@@ -80,6 +80,8 @@ internal data class AppState(
     val botsLoading: Boolean = false,
     val selectedBot: String? = null,
     val selectedSession: String? = null,
+    val createdSession: String? = null,
+    val creatingSession: Boolean = false,
     val messages: List<TranscriptMessage> = emptyList(),
     val threadLoading: Boolean = false,
     val threadHasOlder: Boolean = false,
@@ -108,6 +110,7 @@ internal class AppController(
     private var connectionJob: Job? = null
     private var sessionsJob: Job? = null
     private var threadJob: Job? = null
+    private var creationJob: Job? = null
     private var botsJob: Job? = null
     private var menuJob: Job? = null
     private var menuVisible = false
@@ -210,6 +213,7 @@ internal class AppController(
         connectionJob?.cancel()
         sessionsJob?.cancel()
         threadJob?.cancel()
+        creationJob?.cancel()
         botsJob?.cancel()
         menuJob?.cancel()
         refreshJobs.values.forEach { it.cancel() }
@@ -240,6 +244,7 @@ internal class AppController(
         connectionJob?.cancel()
         sessionsJob?.cancel()
         threadJob?.cancel()
+        creationJob?.cancel()
         botsJob?.cancel()
         menuJob?.cancel()
         mutable.update { it.copy(sessionsLoading = false, threadLoading = false, botsLoading = false) }
@@ -505,6 +510,56 @@ internal class AppController(
                     operationFailure(error)
                 } finally {
                     if (currentCoroutineContext().isActive) mutable.update { it.copy(sessionsLoading = false) }
+                }
+            }
+    }
+
+    fun createSession(
+        title: String? = null,
+        onOpened: (String) -> Unit = {},
+    ) {
+        launchSessionCreation(title = title, onOpened = onOpened)
+    }
+
+    private fun launchSessionCreation(
+        title: String? = null,
+        recoverySession: String? = null,
+        promptId: String? = null,
+        onOpened: (String) -> Unit,
+    ) {
+        if (creationJob?.isActive == true) return
+        val runtime = sessionRuntime
+        val saved = profile
+        if (runtime == null || saved == null) {
+            mutable.update { it.copy(operationError = "Not connected to the dashboard — session was not created") }
+            return
+        }
+        val epoch = connectionEpoch
+        creationJob =
+            scope.launch {
+                val creation =
+                    SessionCreation(
+                        state = { mutable.value },
+                        update = { transform -> mutable.update(transform) },
+                        runtime = runtime,
+                        create = {
+                            check(epoch == connectionEpoch && foreground) { "Connection changed — session was not created" }
+                            val id = gateway.createSession(title, selectedProfile(saved))
+                            check(epoch == connectionEpoch && foreground) { "Connection changed — session creation outcome unknown" }
+                            id
+                        },
+                        opened = { id ->
+                            cancelVoice()
+                            threadJob?.cancel()
+                            persist { it.copy(selectedSessionId = id) }
+                            onOpened(id)
+                        },
+                        submit = ::submit,
+                    )
+                if (recoverySession != null && promptId != null) {
+                    creation.recover(recoverySession, promptId)
+                } else {
+                    creation.start()
                 }
             }
     }
@@ -867,7 +922,7 @@ internal class AppController(
                             },
                     )
                 }
-                val result = runtime.submit(session, text.trim(), queued)
+                val result = runtime.submit(session, text, queued)
                 if (epoch != connectionEpoch) {
                     throw GatewayRpcException("Dashboard connection changed — reconcile before resending", RpcFailureKind.CONNECTION_LOST)
                 }
@@ -880,7 +935,7 @@ internal class AppController(
                     if (error.kind == RpcFailureKind.TIMEOUT || error.kind == RpcFailureKind.CONNECTION_LOST) {
                         it.submitUnknown(id, error.message)
                     } else {
-                        it.submitResult(id, null, error.message ?: "Prompt rejected")
+                        it.submitResult(id, null, error.message ?: "Prompt rejected", rejectionCode = error.code)
                     }
                 }
             } catch (error: Exception) {
@@ -950,7 +1005,7 @@ internal class AppController(
                         },
                         submit = { text ->
                             check(epoch == connectionEpoch && foreground) { "Dashboard connection changed — prompt was not sent" }
-                            val result = runtime.submit(session, text.trim(), queued = false)
+                            val result = runtime.submit(session, text, queued = false)
                             if (epoch != connectionEpoch) {
                                 throw GatewayRpcException(
                                     "Dashboard connection changed — reconcile before resending",
@@ -970,13 +1025,23 @@ internal class AppController(
     fun activate(
         session: String,
         action: String,
+        onSessionCreated: (String) -> Unit = {},
     ) {
         val conversation = mutable.value.conversations[session] ?: Conversation(running = session in mutable.value.liveSessions)
         when {
             action == "stop" -> stop(session)
+            action.startsWith("new-chat:") ->
+                launchSessionCreation(
+                    recoverySession = session,
+                    promptId = action.removePrefix("new-chat:"),
+                    onOpened = onSessionCreated,
+                )
             action.startsWith("retry:") -> {
                 val id = action.removePrefix("retry:")
-                val prompt = conversation.prompts.firstOrNull { it.id == id && it.status == PromptStatus.FAILED } ?: return
+                val prompt =
+                    conversation.prompts.firstOrNull {
+                        it.id == id && it.status == PromptStatus.FAILED && it.rejectionCode != SESSION_CONFLICT_CODE
+                    } ?: return
                 updateConversation(session) { it.copy(prompts = it.prompts.filterNot { row -> row.id == id }) }
                 submit(session, prompt.text)
             }

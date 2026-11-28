@@ -30,6 +30,17 @@ internal class SessionRuntime(
     // Retain old aliases until reconnect: an earlier turn may still emit its final events.
     fun storedId(runtimeId: String): String = storedIds[runtimeId] ?: runtimeId
 
+    /**
+     * A freshly created session is already live: its minted id is both the stored identity and
+     * the runtime id. Seeding both maps lets an immediate open or first submit use it as-is,
+     * with no descendant lookup or resume. A later 4001 still invalidates it like any runtime id.
+     */
+    fun registerCreated(id: String) {
+        require(id.isNotBlank()) { "created session id must not be blank" }
+        currentIds[id] = id
+        storedIds[id] = id
+    }
+
     /** Opening a thread and its first submit share one resume, even when they overlap. */
     suspend fun resume(storedId: String): String =
         resumeMutex.withLock {

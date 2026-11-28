@@ -222,7 +222,11 @@ private fun SimpleLightScreen<Unit>.Surface(
                 } else if (route == Route.Home && (action.startsWith("approval:") || action.startsWith("clarify:"))) {
                     open(controller, route, Route.Thread, voice)
                 } else {
-                    state.selectedSession?.let { controller.activate(it, action) }
+                    state.selectedSession?.let {
+                        controller.activate(it, action) {
+                            if (route != Route.Thread) open(controller, route, Route.Thread, voice)
+                        }
+                    }
                 }
             },
             onHoldStart = {
@@ -353,12 +357,18 @@ private fun SimpleLightScreen<Unit>.Surface(
                             hasMore = state.sessionsHaveMore,
                             loading = state.sessionsLoading,
                             loadError = state.operationError,
+                            creating = state.creatingSession,
                             status = state.statusUi(),
                         ),
                         SessionsActions(
                             onOpenSession = {
                                 controller.openSession(it)
                                 open(controller, route, Route.Thread, voice)
+                            },
+                            onNewSession = {
+                                controller.createSession {
+                                    open(controller, route, Route.Thread, voice)
+                                }
                             },
                             onOpenBots = { open(controller, route, Route.Bots, voice) },
                             onLoadMore = { controller.loadSessions(reset = state.sessions.isEmpty()) },

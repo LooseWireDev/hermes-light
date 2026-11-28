@@ -20,6 +20,7 @@ internal fun Conversation.liveRows(): List<ThreadMessageUi> =
         }
 
         fun promptRow(prompt: PendingPrompt) {
+            val conflict = prompt.rejectionCode == SESSION_CONFLICT_CODE
             val state =
                 when (prompt.status) {
                     PromptStatus.PREPARING -> "preparing"
@@ -27,7 +28,12 @@ internal fun Conversation.liveRows(): List<ThreadMessageUi> =
                     PromptStatus.ACCEPTED -> "accepted — awaiting transcript"
                     PromptStatus.QUEUED -> "queued"
                     PromptStatus.CANCELLING -> "cancelling…"
-                    PromptStatus.FAILED -> if (prompt.error == QUEUED_START_FAILURE) QUEUED_START_FAILURE else "rejected"
+                    PromptStatus.FAILED ->
+                        when {
+                            conflict -> SESSION_CONFLICT_ERROR
+                            prompt.error == QUEUED_START_FAILURE -> QUEUED_START_FAILURE
+                            else -> "rejected"
+                        }
                     PromptStatus.UNKNOWN -> "outcome unknown — reconcile before resending"
                     PromptStatus.STARTED -> ""
                 }
@@ -38,7 +44,11 @@ internal fun Conversation.liveRows(): List<ThreadMessageUi> =
             }
             prompt.error?.takeUnless { it == state }?.let { line("prompt:${prompt.id}:error", it, kind = ThreadMessageKind.Error) }
             if (prompt.status == PromptStatus.FAILED) {
-                line("prompt:${prompt.id}:retry", "Retry", "retry:${prompt.id}")
+                when {
+                    prompt.recovering -> line("prompt:${prompt.id}:recovering", "creating session…")
+                    conflict -> line("prompt:${prompt.id}:new-chat", "start a new chat here", "new-chat:${prompt.id}")
+                    else -> line("prompt:${prompt.id}:retry", "Retry", "retry:${prompt.id}")
+                }
             }
             if (prompt.status == PromptStatus.QUEUED) {
                 if (prompt.admissionId != null) {

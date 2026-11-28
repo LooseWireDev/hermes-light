@@ -481,3 +481,45 @@ direct-submit receipt. An interrupted in-flight submit remains unknown, never bl
 Artifact: `tool/build/outputs/apk/debug/tool-debug.apk`.
 Existing SDK publication/compile-SDK warnings remain. No device or official-builder acceptance
 is inferred from these local gates.
+
+## 2026-11-27 — task group 16: M1.7 new chats and explicit 4090 recovery
+
+- Owner's device rejection (`prompt.submit`, code 4090) is the baseline; it was not reproduced.
+- Gateway creation sends `session.create` with `source: "desktop"` and optional title/profile.
+  A nonblank returned `session_id` is required; creation seeds stored/runtime identity with that id,
+  opens an empty thread and focuses Message without descendant lookup or session resume.
+- Sessions now exposes an SDK New session row to touch and wheel. Creation is single-flight,
+  visibly pending and never automatically retried. Failure leaves the selected thread/drafts intact.
+- A rejected 4090 prompt reads `open in another window`, with `start a new chat here` instead of
+  Retry. Only that explicit action creates and opens another thread and resubmits the original
+  text, including multiline/edge whitespace. While creating, the old row/text stay visible and the
+  action is disabled. Creation failure/cancellation restores the action; subsequent submit failure
+  retains the text in the new thread. Queued-to-direct 4090 rejections use the same recovery path.
+- Other rejection codes retain ordinary Retry. Unknown transport outcomes are not reclassified as
+  ownership conflicts. Create/submit acknowledgement still does not claim delivery or completion;
+  replies and terminal state continue to come from gateway events/transcript evidence.
+- Added protocol, identity-cache, recovery, text-retention, double-activation/cancellation and
+  ordinary-rejection regression coverage. Change specs/roadmap updated; accepted specs not synced
+  pending LP3/live-dashboard acceptance.
+- Local/development lane on owner SDK `main` at
+  `251237ef3778c907c5dbd89e84685532c9d99a28`; pre-existing SDK edits were untouched.
+  Package/version unchanged: **dev.loosewire.hermeslight, 107 / 0.2.3**.
+  No adb/emulator, installation, upload, publication or push. No visual/hardware/live-dashboard
+  proof is claimed; the user forbids the runtime needed to measure the actual LP3 surface.
+- Canonical vault remains unavailable (`Home.md` missing and `Projects/` absent under
+  `/home/gav/Documents/obsidian-vault`). Intended durable update: `local://hermes-light-m17-vault.md`.
+
+### Verification after the last code edit
+
+With the requested Android SDK, JDK 21 on PATH and both Java installation paths:
+
+```sh
+./gradlew -Porg.gradle.java.installations.paths="$HOME/.local/share/light-tern-toolchain/jdk17,$HOME/.local/opt/temurin21" ktlintCheck checkColorLiterals :tool:testDebugUnitTest :tool:assembleDebug --continue --console=plain
+```
+
+**BUILD SUCCESSFUL in 9s.** All four gates passed after the last code edit. Initial runs passed
+unit tests, color guard and APK assembly but found test-only ktlint chain/line wrapping; those
+formatting issues were corrected before the final run. Existing SDK publication/compile-SDK and
+redundant-else warnings remain. No device or official-builder acceptance is inferred.
+
+Artifact: `tool/build/outputs/apk/debug/tool-debug.apk`.

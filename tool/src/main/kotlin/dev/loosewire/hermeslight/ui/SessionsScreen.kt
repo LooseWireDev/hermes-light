@@ -38,7 +38,7 @@ import kotlinx.coroutines.flow.filter
 private const val PAGING_THROTTLE_MS = 250L
 
 /**
- * Sessions: recent sessions, a disabled desktop-only "New session" row, and Bots as the footer row.
+ * Sessions: recent sessions, an actionable New session row, and Bots as the footer row.
  *
  * The wheel reaches the last loaded session; turning past it asks for the next page and stays
  * put. A failed fetch stays retryable with the same gesture. Position is reported as an index
@@ -57,7 +57,7 @@ fun SessionsScreen(
     var focusRow by remember(state.profileId) {
         mutableIntStateOf(
             (state.position?.index ?: state.sessions.indexOfFirst { it.id == state.selectedSessionId })
-                .coerceIn(0, footerIndex),
+                .coerceIn(-1, footerIndex),
         )
     }
     var initialApplied by remember(state.profileId) { mutableStateOf(false) }
@@ -77,12 +77,12 @@ fun SessionsScreen(
                 (
                     state.position?.index
                         ?: state.sessions.indexOfFirst { it.id == state.selectedSessionId }
-                ).coerceIn(0, state.sessions.lastIndex)
+                ).coerceIn(-1, state.sessions.lastIndex)
             focusRow = index
-            listState.scrollToItem(index, state.position?.offsetPx ?: 0)
+            if (index >= 0) listState.scrollToItem(index, state.position?.offsetPx ?: 0)
             initialApplied = true
         }
-        focusRow = focusRow.coerceIn(0, state.sessions.size)
+        focusRow = focusRow.coerceIn(-1, state.sessions.size)
     }
 
     LaunchedEffect(focusRow, initialApplied) {
@@ -112,7 +112,7 @@ fun SessionsScreen(
 
     WheelScroll(
         onUp = {
-            if (focusRow > 0) focusRow--
+            if (focusRow > -1) focusRow--
         },
         onDown = {
             val lastSession = state.sessions.lastIndex
@@ -125,11 +125,12 @@ fun SessionsScreen(
             }
         },
         onClick = {
-            val session = state.sessions.getOrNull(focusRow)
-            if (session != null) {
-                actions.onOpenSession(session.id)
-            } else {
-                actions.onOpenBots()
+            when (focusRow) {
+                -1 -> if (!state.creating) actions.onNewSession()
+                else -> {
+                    val session = state.sessions.getOrNull(focusRow)
+                    if (session != null) actions.onOpenSession(session.id) else actions.onOpenBots()
+                }
             }
         },
         onBack = actions.onBack,
@@ -152,23 +153,22 @@ fun SessionsScreen(
             )
             StatusLine(status = state.status)
 
-            FocusRow(focused = false, enabled = false) {
+            FocusRow(
+                focused = focusRow == -1,
+                enabled = !state.creating,
+                onClick = actions.onNewSession,
+            ) {
                 LightText(
-                    text = "New session",
+                    text = if (state.creating) "creating session…" else "New session",
                     variant = LightTextVariant.Copy,
-                    lighten = true,
                     maxLines = 1,
-                )
-                LightText(
-                    text = "create on desktop for now",
-                    variant = LightTextVariant.Superfine,
                 )
             }
 
             when {
                 state.loading && state.sessions.isEmpty() -> HintLine("loading sessions…")
-                state.loadError != null -> HintLine("load failed — turn at the end to retry: ${state.loadError}")
-                state.sessions.isEmpty() -> HintLine("No sessions yet · turn down for Bots")
+                state.loadError != null -> HintLine(state.loadError)
+                state.sessions.isEmpty() -> HintLine("No sessions yet · turn up for New session")
             }
 
             LazyColumn(

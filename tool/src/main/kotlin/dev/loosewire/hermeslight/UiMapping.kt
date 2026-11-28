@@ -175,6 +175,7 @@ internal fun AppState.threadUi(): ThreadUi {
         emptyText = if (selectedSession == null) "Use History to choose a session." else "No messages yet.",
         status = statusUi(),
         composer = conversation.composer,
+        focusComposer = selectedSession != null && selectedSession == createdSession,
         running = conversation.running,
         voiceFeedback = voiceFeedback,
         voicePhase =

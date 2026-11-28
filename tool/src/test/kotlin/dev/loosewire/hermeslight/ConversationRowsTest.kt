@@ -53,6 +53,32 @@ class ConversationRowsTest {
     }
 
     @Test
+    fun `conflict row offers a new chat instead of retry and hides it while recovering`() {
+        val text = "  keep\n\nthis exact text  "
+        val failed =
+            Conversation()
+                .submit("p", text)
+                .submitResult("p", null, "rejected (4090)", rejectionCode = SESSION_CONFLICT_CODE)
+
+        val rows = failed.liveRows()
+        assertTrue(rows.any { it.body == "$SESSION_CONFLICT_ERROR: $text" })
+        assertTrue(rows.none { it.action == "retry:p" })
+        val action = rows.single { it.action?.startsWith("new-chat:") == true }
+        assertEquals("start a new chat here", action.body)
+        assertEquals("new-chat:p", action.action)
+
+        val recovering =
+            failed.copy(
+                prompts = failed.prompts.map { it.copy(recovering = true) },
+            )
+        val recoveringRows = recovering.liveRows()
+        assertTrue(recoveringRows.any { it.body == "$SESSION_CONFLICT_ERROR: $text" })
+        assertTrue(recoveringRows.any { it.body == "creating session…" })
+        assertTrue(recoveringRows.none { it.action?.startsWith("new-chat:") == true })
+        assertTrue(recoveringRows.none { it.action == "retry:p" })
+    }
+
+    @Test
     fun `queue cancellation needs a receipt and streamed caret waits for gateway completion`() {
         val queued =
             Conversation(running = true)

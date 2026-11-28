@@ -75,7 +75,9 @@ fun ThreadScreen(
             onAction = actions.onAction,
         )
     var focus by remember(state.sessionId) {
-        mutableStateOf(if (state.messages.isEmpty()) ThreadWheelFocus.Composer else ThreadWheelFocus.Thread)
+        mutableStateOf(
+            if (state.focusComposer || state.messages.isEmpty()) ThreadWheelFocus.Composer else ThreadWheelFocus.Thread,
+        )
     }
 
     val firstDecision =
@@ -138,8 +140,7 @@ fun ThreadScreen(
                     ThreadWheelFocus.Thread -> {
                         val action = reader.focusedMessage()?.action
                         when {
-                            action?.startsWith("approval:") == true ||
-                                action?.startsWith("clarify:") == true -> reader.activate()
+                            action != null -> reader.activate()
                             state.running -> actions.onAction("stop")
                             state.composer.isNotBlank() -> actions.onSubmit(state.composer)
                             else -> reader.activate()

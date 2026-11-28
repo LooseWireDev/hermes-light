@@ -10,6 +10,7 @@ package dev.loosewire.hermeslight
 import dev.loosewire.hermeslight.data.TranscriptMessage
 import dev.loosewire.hermeslight.net.ClarifyQuestion
 import dev.loosewire.hermeslight.net.GatewayEvent
+import dev.loosewire.hermeslight.net.intOrNull
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -34,6 +35,12 @@ enum class PromptStatus {
     UNKNOWN,
 }
 
+/** The dashboard refuses a turn while another window or terminal has this chat open. */
+internal const val SESSION_CONFLICT_CODE: Int = 4090
+
+/** Row/state text for a [SESSION_CONFLICT_CODE] rejection. */
+internal const val SESSION_CONFLICT_ERROR: String = "open in another window"
+
 /** A local prompt row; it is never a delivered transcript message. */
 data class PendingPrompt(
     val id: String,
@@ -49,6 +56,10 @@ data class PendingPrompt(
     val baselineRowId: Int? = null,
     /** A queued admission was cancelled and sent directly once; survives foreground changes. */
     val promoted: Boolean = false,
+    /** Dashboard error code for a rejected submit; [SESSION_CONFLICT_CODE] keeps the text recoverable. */
+    val rejectionCode: Int? = null,
+    /** A new-chat recovery is being created; the failed row stays and offers no recovery action. */
+    val recovering: Boolean = false,
 )
 
 /** The one live assistant reply. It is temporary until reconciled against REST. */
@@ -134,27 +145,39 @@ fun Conversation.submit(
 
 /**
  * Applies the `prompt.submit` RPC outcome. A rejection restores the text to the composer.
- * Acceptance is not delivery: the prompt stays local until `message.start` or REST evidence.
+ * A [SESSION_CONFLICT_CODE] rejection is labelled as another-window ownership while keeping the
+ * exact original text and any current composer draft. Acceptance is not delivery: the prompt
+ * stays local until `message.start` or REST evidence.
  */
 fun Conversation.submitResult(
     id: String,
     result: JsonElement?,
     error: String? = null,
+    rejectionCode: Int? = null,
 ): Conversation {
     val prompt = prompts.firstOrNull { it.id == id } ?: return copy(error = error ?: this.error)
     val body = result as? JsonObject
     val status = body?.get("status").scalar()?.lowercase()
-    val rejection =
-        error
-            ?: if (status != null && status in rejectedStatuses) {
-                body?.failureMessage() ?: "send rejected"
+    val rejected = error != null || (status != null && status in rejectedStatuses)
+    if (rejected) {
+        val code = rejectionCode ?: body?.intOrNull("code")
+        val rejection =
+            if (code == SESSION_CONFLICT_CODE) {
+                SESSION_CONFLICT_ERROR
             } else {
-                null
+                error ?: body?.failureMessage() ?: "send rejected"
             }
-    if (rejection != null) {
         return copy(
             composer = restoredComposer(prompt.text),
-            prompts = prompts.replace(id) { it.copy(status = PromptStatus.FAILED, error = rejection) },
+            prompts =
+                prompts.replace(id) {
+                    it.copy(
+                        status = PromptStatus.FAILED,
+                        error = rejection,
+                        rejectionCode = code,
+                        recovering = false,
+                    )
+                },
             error = rejection,
         )
     }
@@ -178,6 +201,8 @@ fun Conversation.submitResult(
                     error = null,
                     admissionId = admissionId,
                     outcomeUnknown = false,
+                    rejectionCode = null,
+                    recovering = false,
                 )
             },
         error = null,
@@ -199,6 +224,7 @@ fun Conversation.submitUnknown(
                     status = PromptStatus.UNKNOWN,
                     error = note,
                     outcomeUnknown = true,
+                    recovering = false,
                 )
             },
         error = note,

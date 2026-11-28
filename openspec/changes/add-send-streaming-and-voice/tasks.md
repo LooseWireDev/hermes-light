@@ -200,7 +200,11 @@ Device log: `rpc prompt.submit failed: code=4090 "This chat is open in another w
 there, or start a new chat here."` — the dashboard refuses a turn on a session another window has open.
 The app has no way to start a new chat, so there is nowhere to go when this fires.
 
-- [ ] 16.1 `session.create {source: "desktop", title?, profile?}` → `{session_id, stored_session_id}`; the created session becomes the open thread with the composer focused.
-- [ ] 16.2 The Sessions `New session` row creates one for real (no more "create on desktop for now").
-- [ ] 16.3 On `4090` (session open elsewhere) the failed prompt row reads `open in another window` with an action `start a new chat here` that creates a session and submits the same text there; the original text is never lost.
-- [ ] 16.4 Unit tests: create → open path, 4090 → create-and-resubmit, and text retention through the recovery.
+- [x] 16.1 `session.create {source: "desktop", title?, profile?}` → `{session_id, stored_session_id}`; the created session becomes the open thread with the composer focused.
+- [x] 16.2 The Sessions `New session` row creates one for real (no more "create on desktop for now").
+- [x] 16.3 On `4090` (session open elsewhere) the failed prompt row reads `open in another window` with an action `start a new chat here` that creates a session and submits the same text there; the original text is never lost.
+- [x] 16.4 Unit tests: create → open path, 4090 → create-and-resubmit, and text retention through the recovery.
+
+M1.7 implementation checkboxes do not claim device/visual acceptance. No adb/emulator is allowed
+for this task. Version remains **107 / 0.2.3**; local gate results and outstanding LP3 acceptance
+are recorded in `evidence.md`.

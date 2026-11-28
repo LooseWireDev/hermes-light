@@ -161,7 +161,7 @@ internal class QueuedPromptDelivery(
                 if (error.kind == RpcFailureKind.TIMEOUT || error.kind == RpcFailureKind.CONNECTION_LOST) {
                     markUnknown(id, error.message ?: UNKNOWN_SUBMIT)
                 } else {
-                    markRejected(id)
+                    markRejected(id, error.code)
                 }
                 return
             } catch (error: Exception) {
@@ -183,11 +183,12 @@ internal class QueuedPromptDelivery(
         val after = prompt(id) ?: return
         if (!applied) return
         when (after.status) {
-            // A rejection body must expose the same safe retry row as a rejected RPC.
+            // A rejection body must expose the same safe retry row as a rejected RPC, unless the
+            // dashboard reported the session-conflict code: that label drives new-chat recovery.
             PromptStatus.FAILED -> {
                 update { current ->
                     val row = current.prompts.firstOrNull { it.id == id }
-                    if (row?.status != PromptStatus.FAILED) {
+                    if (row?.status != PromptStatus.FAILED || row.rejectionCode == SESSION_CONFLICT_CODE) {
                         current
                     } else {
                         current.copy(
@@ -312,6 +313,8 @@ internal class QueuedPromptDelivery(
                                 error = QUEUED_START_FAILURE,
                                 admissionId = null,
                                 outcomeUnknown = false,
+                                rejectionCode = null,
+                                recovering = false,
                             )
                         } else {
                             prompt
@@ -322,10 +325,17 @@ internal class QueuedPromptDelivery(
     }
 
     /** Applies an explicit direct-send rejection only while the row is still live. */
-    private fun markRejected(id: String) {
+    private fun markRejected(
+        id: String,
+        rejectionCode: Int? = null,
+    ) {
         update { current ->
             val row = current.prompts.firstOrNull { it.id == id }
-            if (row == null || row.isSettled()) current else current.submitResult(id, null, QUEUED_START_FAILURE)
+            if (row == null || row.isSettled()) {
+                current
+            } else {
+                current.submitResult(id, null, QUEUED_START_FAILURE, rejectionCode)
+            }
         }
     }
 

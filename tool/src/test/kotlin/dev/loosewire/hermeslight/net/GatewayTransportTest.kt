@@ -302,6 +302,134 @@ class GatewayTransportTest {
         }
 
     @Test
+    fun `createSession creates on the desktop surface and returns the reply's session id`() =
+        runBlocking {
+            val commands = LinkedBlockingQueue<String>()
+            val server =
+                TestWebSocketServer { ws, _ ->
+                    ws.sendText(readyFrame())
+                    val capabilities = ws.awaitText() ?: error("missing capabilities")
+                    ws.sendText(resultFrame(idOf(capabilities), "{}"))
+                    val command = ws.awaitText() ?: error("missing create command")
+                    commands.put(command)
+                    ws.sendText(
+                        resultFrame(idOf(command), """{"session_id":"created-9","stored_session_id":"stored-9"}"""),
+                    )
+                    ws.awaitText(500)
+                }
+            val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
+            try {
+                server.use {
+                    val listener = RecordingListener()
+                    val gateway = Gateway(scope, listener, newHttpClient(), fastConfig())
+                    gateway.connect(connection(server))
+                    listener.awaitConnected()
+
+                    val sessionId = withTimeout(TEST_TIMEOUT) { gateway.createSession("New chat", "work") }
+                    assertEquals("created-9", sessionId)
+
+                    val frame = params(commands.poll(2, TimeUnit.SECONDS) ?: error("no create command"))
+                    assertEquals("session.create", frame.getValue("method").jsonPrimitive.content)
+                    val create = frame.getValue("params").jsonObject
+                    assertEquals("desktop", create.getValue("source").jsonPrimitive.content)
+                    assertEquals("New chat", create.getValue("title").jsonPrimitive.content)
+                    assertEquals("work", create.getValue("profile").jsonPrimitive.content)
+                    assertFalse(create.containsKey("session_id"))
+                    assertFalse(create.containsKey("omit_messages"))
+                }
+            } finally {
+                scope.cancel()
+            }
+        }
+
+    @Test
+    fun `createSession omits a missing or blank title and profile`() =
+        runBlocking {
+            val commands = LinkedBlockingQueue<String>()
+            val server =
+                TestWebSocketServer { ws, _ ->
+                    ws.sendText(readyFrame())
+                    val capabilities = ws.awaitText() ?: error("missing capabilities")
+                    ws.sendText(resultFrame(idOf(capabilities), "{}"))
+                    val defaultCommand = ws.awaitText() ?: error("missing create command")
+                    commands.put(defaultCommand)
+                    ws.sendText(resultFrame(idOf(defaultCommand), """{"session_id":"created-default"}"""))
+                    val blankCommand = ws.awaitText() ?: error("missing create command")
+                    commands.put(blankCommand)
+                    ws.sendText(resultFrame(idOf(blankCommand), """{"session_id":"created-blank"}"""))
+                    ws.awaitText(500)
+                }
+            val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
+            try {
+                server.use {
+                    val listener = RecordingListener()
+                    val gateway = Gateway(scope, listener, newHttpClient(), fastConfig())
+                    gateway.connect(connection(server))
+                    listener.awaitConnected()
+
+                    assertEquals("created-default", withTimeout(TEST_TIMEOUT) { gateway.createSession() })
+                    assertEquals("created-blank", withTimeout(TEST_TIMEOUT) { gateway.createSession("   ", "  ") })
+
+                    val withoutProfile = commandParams(commands.poll(2, TimeUnit.SECONDS) ?: error("no first create"))
+                    val blank = commandParams(commands.poll(2, TimeUnit.SECONDS) ?: error("no second create"))
+                    assertFalse(withoutProfile.containsKey("title"))
+                    assertFalse(withoutProfile.containsKey("profile"))
+                    assertFalse(blank.containsKey("title"))
+                    assertFalse(blank.containsKey("profile"))
+                }
+            } finally {
+                scope.cancel()
+            }
+        }
+
+    @Test
+    fun `createSession fails without a nonblank session id and never invents one`() =
+        runBlocking {
+            val server =
+                TestWebSocketServer { ws, _ ->
+                    ws.sendText(readyFrame())
+                    val capabilities = ws.awaitText() ?: error("missing capabilities")
+                    ws.sendText(resultFrame(idOf(capabilities), "{}"))
+                    val replies =
+                        listOf(
+                            """{"stored_session_id":"stored-9"}""",
+                            """{"session_id":17}""",
+                            """{"session_id":"   "}""",
+                            "null",
+                        )
+                    for (reply in replies) {
+                        val command = ws.awaitText() ?: error("missing create command")
+                        ws.sendText(resultFrame(idOf(command), reply))
+                    }
+                    ws.awaitText(500)
+                }
+            val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
+            try {
+                server.use {
+                    val listener = RecordingListener()
+                    val gateway = Gateway(scope, listener, newHttpClient(), fastConfig())
+                    gateway.connect(connection(server))
+                    listener.awaitConnected()
+
+                    repeat(4) {
+                        val failure =
+                            assertFailsWith<GatewayRpcException> {
+                                withTimeout(TEST_TIMEOUT) { gateway.createSession("Draft title", "work") }
+                            }
+                        assertEquals(RpcFailureKind.REJECTED, failure.kind)
+                        assertNull(failure.code)
+                        assertTrue(failure.message.orEmpty().contains("session.create"))
+                        assertTrue(failure.message.orEmpty().contains("session_id"))
+                        assertFalse(failure.message.orEmpty().contains("Draft title"))
+                        assertFalse(failure.message.orEmpty().contains("stored-9"))
+                    }
+                }
+            } finally {
+                scope.cancel()
+            }
+        }
+
+    @Test
     fun `rpc failure logging carries method code and message but redacts credentials`() {
         val failure =
             GatewayRpcException(

@@ -89,6 +89,38 @@ SHALL remain visibly unknown rather than offer a blind resend. Retryable failure
 that the original queued admission cannot execute. This safety distinction prevents a late original
 queue and a direct resend from both running.
 
+### Requirement: Create a chat on the phone
+
+The Sessions `New session` row SHALL send `session.create {source: "desktop", title?, profile?}`.
+Only a successful reply with a nonblank `session_id` SHALL open a new thread and focus its composer.
+At creation that id SHALL be registered as both stored and runtime identity; no resume is needed.
+Creation failure SHALL remain visible without replacing the selected thread or discarding drafts.
+
+#### Scenario: Create and open
+
+- **WHEN** the user activates New session by touch or wheel
+- **THEN** create one session, open its empty thread and focus the Message composer
+- **AND** preserve the selected dashboard profile, if any
+
+### Requirement: Recover a chat held by another window
+
+A `prompt.submit` rejection with code `4090` SHALL read `open in another window` and offer
+`start a new chat here` instead of ordinary retry. The rejected text SHALL remain retained.
+The app SHALL NOT create another session until the user activates that action.
+
+#### Scenario: Explicit create-and-resubmit
+
+- **WHEN** the user activates start a new chat here on a 4090 row
+- **THEN** create and open a session, submit the identical original text there and show its response there
+- **AND** retain the text through creation failure, navigation and subsequent submit rejection
+- **AND** never claim prompt delivery from the create or submit acknowledgement
+
+#### Scenario: Other rejection
+
+- **WHEN** the rejection code is not 4090
+- **THEN** keep the ordinary Retry action on the existing session
+
+
 ### Requirement: Stop and cancel
 
 A visible stop action SHALL send `session.interrupt` for a running turn and `prompt.cancel` for a
