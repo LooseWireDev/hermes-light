@@ -47,6 +47,8 @@ data class PendingPrompt(
     val outcomeUnknown: Boolean = false,
     /** Transcript row id present before the send; REST rows at or below it cannot prove delivery. */
     val baselineRowId: Int? = null,
+    /** A queued admission was cancelled and sent directly once; survives foreground changes. */
+    val promoted: Boolean = false,
 )
 
 /** The one live assistant reply. It is temporary until reconciled against REST. */

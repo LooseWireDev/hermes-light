@@ -432,3 +432,52 @@ backgrounding, independent session drafts, and wheel traversal through the new f
 
 Artifact: `tool/build/outputs/apk/debug/tool-debug.apk`.
 Existing SDK publication/compile-SDK warnings and fake-microphone Java-Object style warnings remain.
+
+## 2026-11-27 — task group 15: M1.6 stale-running queued-send recovery
+
+- Owner's signed 107 / 0.2.3 AVD report is the baseline; it was not reproduced again.
+- Thread open, foreground reconnect/resume, attention refresh and send preflight reconcile
+  `running` and the live set with `session.active_list` after runtime resume. A valid idle snapshot
+  clears stale running/caret state; newer gateway activity wins snapshot races. Missing/malformed
+  snapshots cannot authorize an idle send. Remembered `conversation.running` is no longer ORed
+  into the decision to queue a socket submission.
+- Queued submissions receive five-second checks of gateway activity and fresh transcript evidence.
+  A genuinely busy queue remains monitored. Start/transcript evidence prevents promotion.
+  An idle, unstarted queue must have its original admission explicitly cancelled before exactly
+  one direct submit of the same local row. This cancellation is necessary: merely sending another
+  copy with `queued: false` could leave both copies executable.
+- A promoted prompt that is refused or provably cannot start reads `could not start — retry` and
+  uses the existing retry action. Acceptance alone is not rendered as transcript delivery.
+  Unknown transport outcomes, missing admission receipts, failed polls and unconfirmed
+  cancellations remain visibly unknown and do not offer blind resend. That uncertainty is distinct
+  from a proven retryable start failure.
+- Promotion state survives foreground changes; paused monitors resume without another direct send.
+  No SDK widgets, voice capture/hold behavior, dependencies, package id or version were changed:
+  **dev.loosewire.hermeslight, 107 / 0.2.3**.
+- Local/development lane on owner SDK `main` at
+  `251237ef3778c907c5dbd89e84685532c9d99a28`; its pre-existing dirty files were untouched.
+  No adb/emulator, installation, signing, upload, publication or push. Actual LP3/live-dashboard
+  acceptance remains unverified; accepted specs are not synced in this run.
+- Canonical vault unavailable (`Home.md` missing and `Projects/` absent under
+  `/home/gav/Documents/obsidian-vault`). Intended durable update: `local://hermes-light-m16-vault.md`.
+
+### Verification after the last code edit
+
+With the requested Android SDK, JDK 21 on PATH and both Java installation paths:
+
+```sh
+./gradlew -Porg.gradle.java.installations.paths="$HOME/.local/share/light-tern-toolchain/jdk17,$HOME/.local/opt/temurin21" ktlintCheck checkColorLiterals :tool:testDebugUnitTest :tool:assembleDebug --continue --console=plain
+```
+
+**BUILD SUCCESSFUL in 10s; 226 tests across 26 files, zero failures/errors/skips.**
+The initial run passed tests, color guard and assembly but found ktlint wrapping; all four
+gates passed after the formatting-only corrections. Regression coverage includes stale-running
+open reconciliation followed by a single direct socket submission, runtime alias activity,
+snapshot/event ordering, invalid snapshots, idle-queue cancellation and one direct promotion,
+busy queues, start/cancel races, missing receipts, unknown outcomes, retry-row rendering,
+promoted start failure, late requeue, foreground rearm, and cancellation while awaiting the
+direct-submit receipt. An interrupted in-flight submit remains unknown, never blindly retryable.
+
+Artifact: `tool/build/outputs/apk/debug/tool-debug.apk`.
+Existing SDK publication/compile-SDK warnings remain. No device or official-builder acceptance
+is inferred from these local gates.

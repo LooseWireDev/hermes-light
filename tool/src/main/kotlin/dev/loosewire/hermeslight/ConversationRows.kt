@@ -27,7 +27,7 @@ internal fun Conversation.liveRows(): List<ThreadMessageUi> =
                     PromptStatus.ACCEPTED -> "accepted — awaiting transcript"
                     PromptStatus.QUEUED -> "queued"
                     PromptStatus.CANCELLING -> "cancelling…"
-                    PromptStatus.FAILED -> "rejected"
+                    PromptStatus.FAILED -> if (prompt.error == QUEUED_START_FAILURE) QUEUED_START_FAILURE else "rejected"
                     PromptStatus.UNKNOWN -> "outcome unknown — reconcile before resending"
                     PromptStatus.STARTED -> ""
                 }
@@ -36,7 +36,7 @@ internal fun Conversation.liveRows(): List<ThreadMessageUi> =
             } else {
                 line("prompt:${prompt.id}", "$state: ${prompt.text}")
             }
-            prompt.error?.let { line("prompt:${prompt.id}:error", it, kind = ThreadMessageKind.Error) }
+            prompt.error?.takeUnless { it == state }?.let { line("prompt:${prompt.id}:error", it, kind = ThreadMessageKind.Error) }
             if (prompt.status == PromptStatus.FAILED) {
                 line("prompt:${prompt.id}:retry", "Retry", "retry:${prompt.id}")
             }

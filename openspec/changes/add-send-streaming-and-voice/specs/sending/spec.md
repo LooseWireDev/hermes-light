@@ -55,6 +55,40 @@ No missing or failed resume SHALL fall back to submitting the stored id.
 RPC failures SHALL be logged at debug level with method, code and message, without credentials,
 request parameters or text bodies.
 
+### Requirement: Reconcile activity and recover an idle queue
+
+Thread open, foreground resume and send preflight SHALL reconcile running state with the gateway's
+active-session snapshot after runtime resume. A remembered running flag alone SHALL NOT select
+`queued: true`. A newer activity event SHALL win over an older snapshot.
+
+After queue acceptance, the phone SHALL check for start/transcript evidence at five-second
+intervals. A legitimately busy session SHALL keep its queue; it SHALL NOT be interrupted or sent
+the prompt directly. An idle session with no start or transcript evidence SHALL have the queued
+admission explicitly cancelled before exactly one direct promotion of the same local row.
+
+#### Scenario: Remembered running state is stale
+
+- **WHEN** an idle session is opened or resumed with a remembered running flag
+- **THEN** the gateway clears the flag, the action becomes Send and the next submit is direct
+
+#### Scenario: Queued prompt was admitted but the idle session never picked it up
+
+- **WHEN** the five-second check finds the session idle and no prompt-start/transcript evidence
+- **THEN** explicitly cancel the original queue admission and submit once with `queued: false`
+- **AND** reuse the local row without claiming delivery from RPC acceptance
+- **AND** a start event or transcript arriving during the check prevents a duplicate submit
+
+#### Scenario: Direct promotion cannot start
+
+- **WHEN** the promoted submission is refused or a subsequent idle check still finds no start
+- **THEN** show `could not start — retry` with the existing row retry action
+- **AND** never promote that row again automatically, including across foreground changes
+
+A missing cancellation receipt, unconfirmed cancellation, failed poll or unknown transport outcome
+SHALL remain visibly unknown rather than offer a blind resend. Retryable failure requires evidence
+that the original queued admission cannot execute. This safety distinction prevents a late original
+queue and a direct resend from both running.
+
 ### Requirement: Stop and cancel
 
 A visible stop action SHALL send `session.interrupt` for a running turn and `prompt.cancel` for a

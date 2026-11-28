@@ -64,6 +64,22 @@ the controller's per-session conversations across screen navigation; SAVE return
 focused. The adjacent send/queue action uses the existing submission path, never the voice callback.
 Unknown model status occupies no placeholder row.
 
+## M1.6 stale activity and idle queue recovery
+
+The gateway `session.active_list` snapshot is shared by attention refresh, thread open/resume,
+send preflight and queued-start checks. Runtime resume precedes open/send reconciliation so
+aliases map back to stored sessions. Newer activity events outrank snapshots; malformed snapshots
+cannot prove idleness. An idle snapshot clears the remembered running state and stale reply caret.
+
+Five-second checks retain a legitimately busy queue. An idle queue is cancelled by admission id
+before one direct resend of the same local row. The promotion marker survives foreground changes;
+restarting its monitor never sends a second direct copy. Start events and fresh transcript evidence
+win over polling/cancellation races. Refused or proven idle-after-promotion sends expose
+`could not start — retry`. Unknown transport/cancellation outcomes remain non-retryable until
+gateway evidence resolves them; losing certainty is not permission to execute twice.
+
+No SDK widget, microphone path, package identity or version changes in M1.6.
+
 ## Acceptance boundary
 
 Unit tests and the requested Gradle gates verify wire encoding, authenticated HTTP,

@@ -117,6 +117,8 @@ internal class AppController(
     private val client = defaultHttpClient()
     private var nextPromptId = 0L
     private val eventRevisions = mutableMapOf<String, Long>()
+    private val activityRevisions = mutableMapOf<String, Long>()
+    private val queuedChecks = mutableMapOf<String, Job>()
     private val refreshJobs = mutableMapOf<String, Job>()
     private var attentionJob: Job? = null
     private val api = Api(client, tokenProvider = { profile?.takeIf { it.authMode == AuthMode.TOKEN }?.token })
@@ -141,7 +143,8 @@ internal class AppController(
                             if (handshake != null) {
                                 handshake?.complete(Unit)
                             } else {
-                                mutable.value.selectedSession?.let(::refreshLatest)
+                                mutable.value.selectedSession?.let { openSession(it, remembered = true) }
+                                resumeQueuedChecks()
                                 refreshAttention()
                             }
                         }
@@ -211,6 +214,8 @@ internal class AppController(
         menuJob?.cancel()
         refreshJobs.values.forEach { it.cancel() }
         refreshJobs.clear()
+        queuedChecks.values.forEach { it.cancel() }
+        queuedChecks.clear()
         attentionJob?.cancel()
         gateway.onForeground(false)
         mutable.update { it.copy(connecting = false, sessionsLoading = false, threadLoading = false, botsLoading = false) }
@@ -263,6 +268,8 @@ internal class AppController(
         persist: Boolean = false,
     ) {
         val epoch = ++connectionEpoch
+        queuedChecks.values.forEach { it.cancel() }
+        queuedChecks.clear()
         gateway.disconnect()
         sessionRuntime = null
         mutable.update { it.copy(connecting = true, status = "connecting…", operationError = null) }
@@ -378,6 +385,7 @@ internal class AppController(
                     loadBots()
                 }
                 authenticated.selectedSessionId?.let { openSession(it, remembered = true) }
+                resumeQueuedChecks()
             }
         } catch (error: CancellationException) {
             if (error is kotlinx.coroutines.TimeoutCancellationException) {
@@ -508,6 +516,7 @@ internal class AppController(
         cancelVoice()
         val saved = profile ?: return
         val runtime = sessionRuntime
+        val epoch = connectionEpoch
         threadJob?.cancel()
         val row = saved.readPositions[id]
         mutable.update {
@@ -540,6 +549,7 @@ internal class AppController(
                         mutable.update { it.copy(messages = page.messages, threadHasOlder = page.hasOlder, threadHasNewer = false) }
                     }
                     checkNotNull(runtime) { "Not connected to the dashboard — session was not resumed" }.resume(id)
+                    reconcileRunning(epoch)
                     if (remembered && mutable.value.conversations[id]?.stream != null) refreshLatest(id)
                 } catch (error: CancellationException) {
                     throw error
@@ -815,14 +825,11 @@ internal class AppController(
                     ?.rowId ?: 0
             }
         updateConversation(session) { current ->
-            val running = session in mutable.value.liveSessions || current.running
-            val submitted = current.copy(running = running).submit(id, text, baseline)
+            val submitted = current.submit(id, text, baseline)
             val next =
-                if (needsBaseline) {
-                    submitted.copy(prompts = submitted.prompts.map { if (it.id == id) it.copy(status = PromptStatus.PREPARING) else it })
-                } else {
-                    submitted
-                }
+                submitted.copy(
+                    prompts = submitted.prompts.map { if (it.id == id) it.copy(status = PromptStatus.PREPARING) else it },
+                )
             if (current.composer.isNotBlank() && current.composer.trim() != text.trim()) {
                 next.copy(composer = current.composer)
             } else {
@@ -831,34 +838,41 @@ internal class AppController(
         }
         scope.launch {
             try {
-                if (needsBaseline) {
-                    val page = api.messages(Endpoint.parse(saved.endpoint), session, profile = selectedProfile(saved))
-                    if (epoch != connectionEpoch) error("Connection changed before the prompt was sent")
-                    updateConversation(session) { current ->
-                        val queued = current.running || session in mutable.value.liveSessions
-                        current.copy(
-                            prompts =
-                                current.prompts.map {
-                                    if (it.id == id) {
-                                        it.copy(
-                                            baselineRowId = page.messages.lastOrNull()?.rowId ?: 0,
-                                            queued = queued,
-                                            status = if (queued) PromptStatus.QUEUED else PromptStatus.PENDING,
-                                        )
-                                    } else {
-                                        it
-                                    }
-                                },
-                        )
+                val latestBaseline =
+                    if (needsBaseline) {
+                        api
+                            .messages(Endpoint.parse(saved.endpoint), session, profile = selectedProfile(saved))
+                            .messages
+                            .lastOrNull()
+                            ?.rowId ?: 0
+                    } else {
+                        baseline
                     }
+                runtime.resume(session)
+                val active = reconcileRunning(epoch)
+                val queued = session in active
+                updateConversation(session) { current ->
+                    current.copy(
+                        prompts =
+                            current.prompts.map {
+                                if (it.id == id) {
+                                    it.copy(
+                                        baselineRowId = latestBaseline,
+                                        queued = queued,
+                                        status = if (queued) PromptStatus.QUEUED else PromptStatus.PENDING,
+                                    )
+                                } else {
+                                    it
+                                }
+                            },
+                    )
                 }
-                val queued =
-                    mutable.value.conversations[session]
-                        ?.prompts
-                        ?.firstOrNull { it.id == id }
-                        ?.queued == true
                 val result = runtime.submit(session, text.trim(), queued)
+                if (epoch != connectionEpoch) {
+                    throw GatewayRpcException("Dashboard connection changed — reconcile before resending", RpcFailureKind.CONNECTION_LOST)
+                }
                 updateConversation(session) { it.submitResult(id, result) }
+                startQueuedCheck(session, id, runtime, saved, epoch)
             } catch (error: CancellationException) {
                 throw error
             } catch (error: GatewayRpcException) {
@@ -873,6 +887,83 @@ internal class AppController(
                 updateConversation(session) { it.submitResult(id, null, error.message ?: "Prompt was not sent") }
             }
         }
+    }
+
+    private fun resumeQueuedChecks() {
+        val runtime = sessionRuntime ?: return
+        val saved = profile ?: return
+        for ((session, conversation) in mutable.value.conversations) {
+            for (prompt in conversation.prompts) {
+                startQueuedCheck(session, prompt.id, runtime, saved, connectionEpoch)
+            }
+        }
+    }
+
+    private fun startQueuedCheck(
+        session: String,
+        id: String,
+        runtime: SessionRuntime,
+        saved: Profile,
+        epoch: Int,
+    ) {
+        if (!foreground || queuedChecks[id]?.isActive == true) return
+        val prompt =
+            mutable.value.conversations[session]
+                ?.prompts
+                ?.firstOrNull { it.id == id } ?: return
+        if (prompt.status != PromptStatus.QUEUED &&
+            !(prompt.promoted && (prompt.status == PromptStatus.PENDING || prompt.status == PromptStatus.ACCEPTED))
+        ) {
+            return
+        }
+        queuedChecks[id] =
+            scope.launch {
+                try {
+                    QueuedPromptDelivery(
+                        conversation = { mutable.value.conversations[session] ?: Conversation() },
+                        update = { transform -> updateConversation(session, transform) },
+                        poll = {
+                            check(epoch == connectionEpoch && foreground) { "Dashboard connection changed — reconcile before resending" }
+                            val revision = eventRevisions[session] ?: 0L
+                            val active = reconcileRunning(epoch)
+                            val page = api.messages(Endpoint.parse(saved.endpoint), session, profile = selectedProfile(saved))
+                            check(epoch == connectionEpoch) { "Dashboard connection changed — reconcile before resending" }
+                            if (revision != (eventRevisions[session] ?: 0L)) {
+                                null
+                            } else {
+                                updateConversation(session) { it.reconcile(page.messages) }
+                                session in active
+                            }
+                        },
+                        cancel = { prompt ->
+                            check(epoch == connectionEpoch && foreground) { "Dashboard connection changed — reconcile before resending" }
+                            val params = prompt.cancelParams(runtime.runtimeId(session))
+                            if (params == null) {
+                                false
+                            } else {
+                                val result = gateway.request("prompt.cancel", params) as? JsonObject
+                                val status = (result?.get("status") as? JsonPrimitive)?.content?.lowercase()
+                                val outcome = (result?.get("outcome") as? JsonPrimitive)?.content?.lowercase()
+                                check(epoch == connectionEpoch) { "Dashboard connection changed — reconcile before resending" }
+                                status in CANCELLED_STATUSES || outcome in CANCELLED_STATUSES
+                            }
+                        },
+                        submit = { text ->
+                            check(epoch == connectionEpoch && foreground) { "Dashboard connection changed — prompt was not sent" }
+                            val result = runtime.submit(session, text.trim(), queued = false)
+                            if (epoch != connectionEpoch) {
+                                throw GatewayRpcException(
+                                    "Dashboard connection changed — reconcile before resending",
+                                    RpcFailureKind.CONNECTION_LOST,
+                                )
+                            }
+                            result
+                        },
+                    ).confirm(id)
+                } finally {
+                    if (queuedChecks[id] === currentCoroutineContext()[Job]) queuedChecks.remove(id)
+                }
+            }
     }
 
     /** Resolve stable request ids against current hoisted state, never a stale list index. */
@@ -964,6 +1055,8 @@ internal class AppController(
                 throw error
             } catch (error: Exception) {
                 updateConversation(session) { it.cancelQueuedResult(id, error.message ?: "Cancellation failed") }
+            } finally {
+                if (currentCoroutineContext().isActive) resumeQueuedChecks()
             }
         }
     }
@@ -1015,36 +1108,23 @@ internal class AppController(
         }
     }
 
+    /** A valid snapshot may clear stale flags; newer gateway activity always wins the race. */
+    private suspend fun reconcileRunning(epoch: Int): Set<String> {
+        val revisions = activityRevisions.toMap()
+        val active = activeSessionIds(gateway.request("session.active_list", buildJsonObject {}), ::storedId)
+        check(epoch == connectionEpoch) { "Dashboard connection changed before live state was checked" }
+        val changed = activityRevisions.keys.filter { activityRevisions[it] != revisions[it] }.toSet()
+        mutable.update { it.reconcileActivity(active, changed) }
+        return mutable.value.liveSessions
+    }
+
     private fun refreshAttention() {
         attentionJob?.cancel()
         val epoch = connectionEpoch
         attentionJob =
             scope.launch {
                 try {
-                    val revisions = eventRevisions.toMap()
-                    val snapshot = gateway.request("session.active_list", buildJsonObject {})
-                    val entries =
-                        (snapshot as? JsonObject)?.get("sessions") as? JsonArray
-                            ?: error("Dashboard returned no active-session snapshot")
-                    val active =
-                        entries
-                            .mapNotNull { item ->
-                                val row = item as? JsonObject ?: return@mapNotNull null
-                                val id = (row["session_key"] as? JsonPrimitive)?.content?.let(::storedId) ?: return@mapNotNull null
-                                val status = (row["status"] as? JsonPrimitive)?.content
-                                id.takeIf { status in LIVE_STATUSES }
-                            }.toSet()
-                    if (epoch != connectionEpoch) return@launch
-                    mutable.update { current ->
-                        val changed = eventRevisions.keys.filter { eventRevisions[it] != revisions[it] }.toSet()
-                        current.copy(
-                            liveSessions = (active - changed) + (current.liveSessions intersect changed),
-                            conversations =
-                                current.conversations.mapValues { (id, conversation) ->
-                                    if (id in changed) conversation else conversation.copy(running = id in active)
-                                },
-                        )
-                    }
+                    val active = reconcileRunning(epoch)
                     val sessions =
                         (
                             mutable.value.desktopNotices.keys + active +
@@ -1113,27 +1193,17 @@ internal class AppController(
             scope.launch {
                 try {
                     val endpoint = Endpoint.parse(saved.endpoint)
-                    val detail = api.session(endpoint, session, selectedProfile(saved))
+                    val active = reconcileRunning(epoch)
                     val page = api.messages(endpoint, session, profile = selectedProfile(saved))
                     if (epoch != connectionEpoch || revision != (eventRevisions[session] ?: 0L)) return@launch
-                    val running = detail.status?.lowercase()?.let { it in LIVE_STATUSES }
                     mutable.update { current ->
                         val conversation = current.conversations[session] ?: Conversation()
-                        val reconciled =
-                            conversation
-                                .reconcile(page.messages)
-                                .copy(running = running ?: conversation.running)
+                        val reconciled = conversation.copy(running = session in active).reconcile(page.messages)
                         current.copy(
                             messages = if (current.selectedSession == session) page.messages else current.messages,
                             threadHasOlder = if (current.selectedSession == session) page.hasOlder else current.threadHasOlder,
                             threadHasNewer = if (current.selectedSession == session) false else current.threadHasNewer,
                             conversations = current.conversations + (session to reconciled),
-                            liveSessions =
-                                when (running) {
-                                    true -> current.liveSessions + session
-                                    false -> current.liveSessions - session
-                                    null -> current.liveSessions
-                                },
                         )
                     }
                 } catch (error: CancellationException) {
@@ -1155,6 +1225,12 @@ internal class AppController(
             if (event.type == "sessions.changed") loadBots()
         }
         session?.let { eventRevisions[it] = (eventRevisions[it] ?: 0L) + 1 }
+        if (event is GatewayEvent.MessageStart || event is GatewayEvent.MessageDelta ||
+            event is GatewayEvent.MessageInterim || event is GatewayEvent.MessageDone ||
+            event is GatewayEvent.Done || event is GatewayEvent.Failure || event is GatewayEvent.SessionStatus
+        ) {
+            session?.let { activityRevisions[it] = (activityRevisions[it] ?: 0L) + 1 }
+        }
         mutable.update { reduceGatewayEvent(it, event, session) }
         if ((event is GatewayEvent.Done || event is GatewayEvent.MessageDone || event is GatewayEvent.Failure) &&
             session == mutable.value.selectedSession
@@ -1173,7 +1249,6 @@ internal class AppController(
     }
 }
 
-private val LIVE_STATUSES = setOf("starting", "waiting", "working", "streaming", "resuming")
 private val CANCELLED_STATUSES = setOf("cancelled", "canceled")
 
 private fun selectedProfile(profile: Profile): String? = profile.botProfile?.takeIf { it.startsWith("profile:") }?.removePrefix("profile:")
