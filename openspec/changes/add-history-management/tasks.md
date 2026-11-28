@@ -25,3 +25,9 @@ One commit per group; gates green at every commit (ktlint, colour guard, unit te
 
 - [x] 4.1 Version 0.2.4 / code 108; evidence note appended.
 - [ ] 4.2 Parent signs and publishes alpha8 (outside this implementation task).
+
+## 5. Device findings — mutation fence + server search (from alpha8 testing)
+
+- [ ] 5.1 Rename failed with `HTTP 409` on the device: current backends refuse an unfenced PATCH. Read `GET api/sessions/{id}/mutation-snapshot` first (`runtime_revision`, `runtime_generation`, values may be int or string), then PATCH `{title, request_id, expected_revision, expected_generation}`. Same fence for DELETE via query params `request_id`, `expected_revision`, `expected_generation`. On `409 client_upgrade_required`, re-read the snapshot once and retry; if it still refuses, say `changed elsewhere — retry`.
+- [ ] 5.2 Search is client-side over the loaded page (`0 of 50` on 801 sessions). Use `GET api/sessions/search?q=&limit=` when the query is 2+ characters (server-wide), falling back to the local filter if the endpoint is unavailable; the header shows the true count from the response.
+- [ ] 5.3 Unit tests: fence acquisition and body shape for rename/delete, one 409 retry, and search endpoint fallback.
